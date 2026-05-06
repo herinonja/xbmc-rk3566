@@ -35,7 +35,6 @@ jobs:
           ENV PREFIX=/usr/local/kodi-rk
           ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
           ENV LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib
-          ENV MAKEFLAGS="-j$(nproc)"
 
           RUN apt-get update && apt-get install -y --no-install-recommends \
               build-essential git cmake ninja-build pkg-config ccache \
@@ -68,28 +67,28 @@ jobs:
               cmake --install mpp/build && \
               ldconfig
 
-          RUN if ! pkg-config --exists rockchip_mpp; then \
-                mkdir -p /usr/lib/aarch64-linux-gnu/pkgconfig; \
-                printf '%s\n' \
-                  'prefix=/usr' \
-                  'exec_prefix=${prefix}' \
-                  'libdir=/usr/lib/aarch64-linux-gnu' \
-                  'includedir=${prefix}/include' \
-                  '' \
-                  'Name: rockchip_mpp' \
-                  'Description: Rockchip Media Process Platform' \
-                  'Version: 1.0.0' \
-                  'Libs: -L${libdir} -lrockchip_mpp' \
-                  'Cflags: -I${includedir}' \
-                  > /usr/lib/aarch64-linux-gnu/pkgconfig/rockchip_mpp.pc; \
-              fi && \
-              pkg-config --exists rockchip_mpp && \
-              pkg-config --cflags --libs rockchip_mpp
+          RUN mkdir -p /usr/lib/aarch64-linux-gnu/pkgconfig && \
+              printf '%s\n' \
+                'prefix=/usr' \
+                'exec_prefix=${prefix}' \
+                'libdir=/usr/lib/aarch64-linux-gnu' \
+                'includedir=${prefix}/include' \
+                '' \
+                'Name: rockchip_mpp' \
+                'Description: Rockchip Media Process Platform' \
+                'Version: 1.0.0' \
+                'Libs: -L${libdir} -lrockchip_mpp' \
+                'Cflags: -I${includedir}' \
+                > /usr/lib/aarch64-linux-gnu/pkgconfig/rockchip_mpp.pc && \
+              pkg-config --exists rockchip_mpp
 
           RUN git clone --depth=1 https://github.com/airockchip/librga.git
 
-          RUN mkdir -p /usr/include /usr/lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu/pkgconfig && \
-              cp -a /opt/src/librga/include/* /usr/include/ && \
+          RUN mkdir -p /usr/include/rga /usr/lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu/pkgconfig && \
+              cp -a /opt/src/librga/include/* /usr/include/ || true && \
+              cp -a /opt/src/librga/include/*.h /usr/include/rga/ || true && \
+              cp -a /opt/src/librga/include/rga/* /usr/include/rga/ || true && \
+              test -f /usr/include/rga/RgaApi.h && \
               RGA_SO="$(find /opt/src/librga/libs/Linux/gcc-aarch64 -name 'librga.so*' | head -n 1)" && \
               test -n "${RGA_SO}" && \
               cp -a "${RGA_SO}" /usr/lib/aarch64-linux-gnu/librga.so && \
@@ -108,8 +107,7 @@ jobs:
                 > /usr/lib/aarch64-linux-gnu/pkgconfig/librga.pc && \
               ldconfig && \
               pkg-config --exists librga && \
-              pkg-config --cflags --libs librga && \
-              test -f /usr/lib/aarch64-linux-gnu/librga.so
+              pkg-config --cflags --libs librga
 
           RUN git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg-rockchip
 
@@ -129,11 +127,8 @@ jobs:
                 --disable-debug \
               || { echo '===== FFmpeg configure failed ====='; cat ffbuild/config.log; exit 1; }
 
-          RUN set -eux; \
-              make -j"$(nproc)" \
-              || { echo '===== FFmpeg make failed ====='; tail -300 ffbuild/config.log || true; exit 1; }
-
-          RUN make install && \
+          RUN make -j"$(nproc)" && \
+              make install && \
               ldconfig && \
               ffmpeg -version && \
               ffmpeg -decoders | grep -Ei 'rkmpp|h264|hevc|vp9' || true && \
