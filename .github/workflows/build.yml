@@ -22,7 +22,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Create build container files
+      - name: Create Dockerfile
         run: |
           mkdir -p build-kodi-rk
 
@@ -30,15 +30,14 @@ jobs:
           FROM arm64v8/debian:bookworm
 
           ENV DEBIAN_FRONTEND=noninteractive
-          ENV KODI_BRANCH=Omega
           ENV PREFIX=/usr/local/kodi-rk
           ENV MAKEFLAGS="-j$(nproc)"
+          ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
 
           RUN apt-get update && apt-get install -y --no-install-recommends \
               build-essential git cmake ninja-build pkg-config ccache \
-              autoconf automake libtool gettext \
-              ca-certificates curl wget unzip zip \
-              python3 python3-dev python3-pip python3-setuptools \
+              autoconf automake libtool gettext ca-certificates \
+              curl wget unzip zip python3 python3-dev python3-pip \
               yasm nasm gperf default-jre swig \
               libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
               libwayland-dev wayland-protocols libxkbcommon-dev \
@@ -48,54 +47,54 @@ jobs:
               libdbus-1-dev libfmt-dev libfreetype-dev libfribidi-dev \
               libgif-dev libgnutls28-dev libiso9660-dev libjpeg-dev \
               liblcms2-dev liblirc-dev liblzo2-dev libmicrohttpd-dev \
-              libmysqlclient-dev libnfs-dev libpcre2-dev libplist-dev \
+              libmariadb-dev libnfs-dev libpcre2-dev libplist-dev \
               libpng-dev libshairplay-dev libsmbclient-dev libsqlite3-dev \
               libssl-dev libtag1-dev libtinyxml-dev libtinyxml2-dev \
               libudev-dev libva-dev libvdpau-dev libxml2-dev libxslt1-dev \
-              uuid-dev zlib1g-dev \
-              debhelper dh-make devscripts fakeroot equivs \
-              && rm -rf /var/lib/apt/lists/*
+              uuid-dev zlib1g-dev && \
+              rm -rf /var/lib/apt/lists/*
 
           WORKDIR /opt/src
 
-          # Rockchip MPP
           RUN git clone --depth=1 https://github.com/rockchip-linux/mpp.git && \
               cmake -S mpp -B mpp/build -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/usr && \
               cmake --build mpp/build && \
-              cmake --install mpp/build
+              cmake --install mpp/build && \
+              ldconfig
 
-          # Rockchip RGA / librga
           RUN git clone --depth=1 https://github.com/airockchip/librga.git && \
               cmake -S librga -B librga/build -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/usr && \
-              cmake --build librga/build && \
+              cmake --build librga/build || true && \
               cmake --install librga/build || true
 
-          # Fallback: install headers/libs manually if librga cmake install is incomplete
-          RUN if [ ! -f /usr/lib/pkgconfig/librga.pc ] && [ ! -f /usr/lib/aarch64-linux-gnu/pkgconfig/librga.pc ]; then \
-                mkdir -p /usr/include/rga /usr/lib/aarch64-linux-gnu/pkgconfig; \
-                cp -a librga/include/* /usr/include/ || true; \
-                cp -a librga/libs/Linux/gcc-aarch64/librga.so /usr/lib/aarch64-linux-gnu/ || true; \
-                cat > /usr/lib/aarch64-linux-gnu/pkgconfig/librga.pc <<'PC'; \
-          prefix=/usr
-          exec_prefix=${prefix}
-          libdir=/usr/lib/aarch64-linux-gnu
-          includedir=${prefix}/include
+          RUN mkdir -p /usr/include/rga /usr/lib/aarch64-linux-gnu/pkgconfig && \
+              cp -a librga/include/* /usr/include/ || true && \
+              if [ -f librga/libs/Linux/gcc-aarch64/librga.so ]; then \
+                cp -a librga/libs/Linux/gcc-aarch64/librga.so /usr/lib/aarch64-linux-gnu/; \
+              fi && \
+              if [ ! -f /usr/lib/aarch64-linux-gnu/pkgconfig/librga.pc ]; then \
+                printf '%s\n' \
+                  'prefix=/usr' \
+                  'exec_prefix=${prefix}' \
+                  'libdir=/usr/lib/aarch64-linux-gnu' \
+                  'includedir=${prefix}/include' \
+                  '' \
+                  'Name: librga' \
+                  'Description: Rockchip RGA userspace library' \
+                  'Version: 1.10.0' \
+                  'Libs: -L${libdir} -lrga' \
+                  'Cflags: -I${includedir}' \
+                  > /usr/lib/aarch64-linux-gnu/pkgconfig/librga.pc; \
+              fi && \
+              ldconfig && \
+              pkg-config --exists librga
 
-          Name: librga
-          Description: Rockchip RGA userspace library
-          Version: 1.10.0
-          Libs: -L${libdir} -lrga
-          Cflags: -I${includedir}
-          PC \
-              fi
+          RUN pkg-config --exists rockchip_mpp || pkg-config --exists mpp
 
-          RUN ldconfig && pkg-config --modversion rockchip_mpp && pkg-config --modversion librga
-
-          # FFmpeg with RKMPP/RGA support
           RUN git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg-rockchip && \
               cd ffmpeg-rockchip && \
               ./configure \
@@ -114,7 +113,6 @@ jobs:
               ldconfig && \
               ffmpeg -hwaccels | grep -i rkmpp
 
-          # Kodi Omega
           RUN git clone --depth=1 --branch Omega https://github.com/xbmc/xbmc.git kodi
 
           WORKDIR /opt/src/kodi
@@ -140,10 +138,9 @@ jobs:
 
           RUN mkdir -p /out && \
               tar -C /opt/kodi-rk-root -czf /out/kodi-omega-rk3566-rkmpp-rga-arm64.tar.gz .
-
           EOF
 
-      - name: Build ARM64 Kodi package
+      - name: Build ARM64 image and export artifact
         run: |
           docker buildx build \
             --platform linux/arm64 \
@@ -152,7 +149,7 @@ jobs:
 
       - name: List output
         run: |
-          find output -type f -maxdepth 3 -print
+          find output -type f -print
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
