@@ -107,13 +107,6 @@ jobs:
                 -DENABLE_INTERNAL_RapidJSON=ON \
                 -DENABLE_NFS=ON \
                 -DENABLE_OPTICAL=ON \
-                -DENABLE_AIRTUNES=ON \
-                -DENABLE_AVAHI=ON \
-                -DENABLE_UPNP=ON \
-                -DENABLE_CEC=ON \
-                -DENABLE_PULSEAUDIO=ON \
-                -DENABLE_PIPEWIRE=ON \
-                -DENABLE_BLUETOOTH=ON \
                 2>&1 | tee /tmp/kodi-cmake.log || \
               { cat /tmp/kodi-cmake.log; cat CMakeFiles/CMakeError.log || true; exit 1; }
 
