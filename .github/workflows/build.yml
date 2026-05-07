@@ -35,7 +35,7 @@ jobs:
           ENV PREFIX=/usr/local/kodi-rk
           ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
           ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/usr/lib
-          ENV CMAKE_PREFIX_PATH=/usr/local
+          ENV CMAKE_PREFIX_PATH=/usr/local:/usr
 
           RUN apt-get update && apt-get install -y --no-install-recommends \
               build-essential git cmake ninja-build pkg-config ccache \
@@ -47,6 +47,7 @@ jobs:
               libasound2-dev libpulse-dev libudev-dev libinput-dev \
               libass-dev libavahi-client-dev libavahi-compat-libdnssd-dev \
               libbluetooth-dev libbluray-dev libcap-dev \
+              libcdio-dev libcdio++-dev libiso9660-dev \
               libcurl4-openssl-dev libdav1d-dev libkrb5-dev \
               libdbus-1-dev libfmt-dev libfreetype-dev libfribidi-dev \
               libgif-dev libgnutls28-dev libjpeg-dev \
