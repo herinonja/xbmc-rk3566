@@ -103,6 +103,7 @@ jobs:
                 -DENABLE_WAYLAND=OFF \
                 -DENABLE_INTERNAL_FFMPEG=OFF \
                 -DFFMPEG_PATH=/usr \
+                -DENABLE_INTERNAL_FSTRCMP=ON \
                 -DENABLE_NFS=ON \
                 -DENABLE_OPTICAL=ON \
                 2>&1 | tee /tmp/kodi-cmake.log || \
