@@ -46,7 +46,7 @@ jobs:
               libasound2-dev libpulse-dev libudev-dev libinput-dev \
               libass-dev libavahi-client-dev libavahi-compat-libdnssd-dev \
               libbluetooth-dev libbluray-dev libcap-dev \
-              libcurl4-openssl-dev libdav1d-dev \
+              libcurl4-openssl-dev libdav1d-dev libkrb5-dev \
               libdbus-1-dev libfmt-dev libfreetype-dev libfribidi-dev \
               libgif-dev libgnutls28-dev libjpeg-dev \
               liblcms2-dev liblirc-dev liblzo2-dev libmicrohttpd-dev \
