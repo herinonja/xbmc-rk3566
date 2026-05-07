@@ -53,6 +53,7 @@ jobs:
               libswscale-dev libswresample-dev libpostproc-dev \
               librga-dev librockchip-mpp-dev \
               libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
+              libdisplay-info-dev \
               libwayland-dev wayland-protocols libxkbcommon-dev \
               libasound2-dev libpulse-dev libpipewire-0.3-dev \
               libudev-dev libinput-dev \
@@ -90,7 +91,9 @@ jobs:
               pkg-config --modversion libpcre || true && \
               pkg-config --modversion libpcre2-8 || true && \
               echo "===== spdlog =====" && \
-              pkg-config --modversion spdlog || true
+              pkg-config --modversion spdlog || true && \
+              echo "===== libdisplay-info =====" && \
+              pkg-config --modversion libdisplay-info || true
 
           WORKDIR /opt/src
 
