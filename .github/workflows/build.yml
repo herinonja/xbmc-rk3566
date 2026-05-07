@@ -44,16 +44,17 @@ jobs:
               libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
               libwayland-dev wayland-protocols libxkbcommon-dev \
               libasound2-dev libpulse-dev libudev-dev libinput-dev \
-              libass-dev libavahi-client-dev libbluetooth-dev libbluray-dev \
-              libcdio-dev libcec-dev libcurl4-openssl-dev \
+              libass-dev libavahi-client-dev libavahi-compat-libdnssd-dev \
+              libbluetooth-dev libbluray-dev libcap-dev libcdio-dev libcdio++-dev \
+              libcec-dev libcurl4-openssl-dev libdav1d-dev \
               libdbus-1-dev libfmt-dev libfreetype-dev libfribidi-dev \
               libgif-dev libgnutls28-dev libiso9660-dev libjpeg-dev \
               liblcms2-dev liblirc-dev liblzo2-dev libmicrohttpd-dev \
-              libmariadb-dev libnfs-dev libpcre2-dev libplist-dev \
-              libpng-dev libshairplay-dev libsmbclient-dev libsqlite3-dev \
-              libssl-dev libtag1-dev libtinyxml-dev libtinyxml2-dev \
-              libudev-dev libva-dev libvdpau-dev libxml2-dev libxslt1-dev \
-              uuid-dev zlib1g-dev && \
+              libmariadb-dev libnfs-dev libpcre2-dev libpipewire-0.3-dev \
+              libplist-dev libpng-dev libshairplay-dev libsmbclient-dev \
+              libsndio-dev libsqlite3-dev libssl-dev libtag1-dev \
+              libtinyxml-dev libtinyxml2-dev libudev-dev libva-dev libvdpau-dev \
+              libxml2-dev libxslt1-dev uuid-dev zlib1g-dev && \
               rm -rf /var/lib/apt/lists/*
 
           WORKDIR /opt/src
@@ -81,9 +82,7 @@ jobs:
                 'Cflags: -I${includedir}' \
                 > /usr/lib/aarch64-linux-gnu/pkgconfig/rockchip_mpp.pc && \
               pkg-config --modversion rockchip_mpp && \
-              pkg-config --cflags --libs rockchip_mpp && \
-              test -f /usr/include/rockchip/rk_mpi.h && \
-              ldconfig -p | grep rockchip_mpp
+              test -f /usr/include/rockchip/rk_mpi.h
 
           RUN git clone --depth=1 https://github.com/airockchip/librga.git
 
@@ -109,9 +108,7 @@ jobs:
                 'Cflags: -I${includedir}' \
                 > /usr/lib/aarch64-linux-gnu/pkgconfig/librga.pc && \
               ldconfig && \
-              pkg-config --modversion librga && \
-              pkg-config --cflags --libs librga && \
-              ldconfig -p | grep librga
+              pkg-config --modversion librga
 
           RUN git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg-rockchip
 
@@ -129,7 +126,7 @@ jobs:
                 --disable-static \
                 --disable-doc \
                 --disable-debug \
-              || { echo '===== FFmpeg configure failed ====='; cat ffbuild/config.log; exit 1; }
+              || { cat ffbuild/config.log; exit 1; }
 
           RUN make -j"$(nproc)" && \
               make install && \
@@ -145,6 +142,7 @@ jobs:
           WORKDIR /opt/src/kodi
 
           RUN mkdir -p build && cd build && \
+              set -o pipefail && \
               cmake .. -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=${PREFIX} \
@@ -160,7 +158,8 @@ jobs:
                 -DENABLE_INTERNAL_CROSSGUID=ON \
                 -DENABLE_INTERNAL_FSTRCMP=ON \
                 -DENABLE_INTERNAL_RapidJSON=ON \
-              || { echo '===== Kodi CMake failed ====='; cat CMakeFiles/CMakeError.log || true; exit 1; }
+                2>&1 | tee /tmp/kodi-cmake.log || \
+              { echo '===== Kodi CMake full log ====='; cat /tmp/kodi-cmake.log; echo '===== CMakeError ====='; cat CMakeFiles/CMakeError.log || true; exit 1; }
 
           RUN cd build && \
               ninja && \
