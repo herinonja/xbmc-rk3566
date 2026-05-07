@@ -64,9 +64,25 @@ jobs:
               tar -xzf fstrcmp-0.7.D001.tar.gz && \
               cd fstrcmp-0.7.D001 && \
               ./configure --prefix=/usr/local && \
-              make -j$(nproc) && \
-              make install && \
-              ldconfig
+              make -j"$(nproc)" lib/libfstrcmp.la && \
+              mkdir -p /usr/local/lib /usr/local/include /usr/local/lib/pkgconfig && \
+              cp -a lib/.libs/libfstrcmp.so* /usr/local/lib/ && \
+              cp -a lib/.libs/libfstrcmp.a /usr/local/lib/ || true && \
+              cp -a lib/fstrcmp.h /usr/local/include/ && \
+              printf '%s\n' \
+                'prefix=/usr/local' \
+                'exec_prefix=${prefix}' \
+                'libdir=${prefix}/lib' \
+                'includedir=${prefix}/include' \
+                '' \
+                'Name: fstrcmp' \
+                'Description: Fuzzy string compare library' \
+                'Version: 0.7' \
+                'Libs: -L${libdir} -lfstrcmp' \
+                'Cflags: -I${includedir}' \
+                > /usr/local/lib/pkgconfig/fstrcmp.pc && \
+              ldconfig && \
+              pkg-config --modversion fstrcmp
 
           RUN git clone --depth=1 https://github.com/sahlberg/libnfs.git && \
               cd libnfs && \
