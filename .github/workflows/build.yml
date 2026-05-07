@@ -63,7 +63,7 @@ jobs:
               libdbus-1-dev libfmt-dev libfreetype-dev libfribidi-dev \
               libgif-dev libgnutls28-dev libjpeg-dev \
               liblcms2-dev liblirc-dev liblzo2-dev libmicrohttpd-dev \
-              libmariadb-dev libnfs-dev libpcre2-dev \
+              libmariadb-dev libnfs-dev libpcre3-dev libpcre2-dev \
               libplist-dev libpng-dev libshairplay-dev libsmbclient-dev \
               libsndio-dev libsqlite3-dev libssl-dev libtag1-dev \
               libtinyxml-dev libtinyxml2-dev \
@@ -84,7 +84,10 @@ jobs:
               pkg-config --modversion librga || true && \
               echo "===== FlatBuffers =====" && \
               flatc --version && \
-              pkg-config --modversion flatbuffers || true
+              pkg-config --modversion flatbuffers || true && \
+              echo "===== PCRE =====" && \
+              pkg-config --modversion libpcre || true && \
+              pkg-config --modversion libpcre2-8 || true
 
           WORKDIR /opt/src
 
