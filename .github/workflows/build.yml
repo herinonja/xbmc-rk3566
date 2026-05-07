@@ -60,7 +60,8 @@ jobs:
               libbluetooth-dev libbluray-dev libcap-dev \
               libcdio-dev libcdio++-dev libiso9660-dev \
               libcec-dev libcurl4-openssl-dev libdav1d-dev libkrb5-dev \
-              libdbus-1-dev libfmt-dev libfreetype-dev libfribidi-dev \
+              libdbus-1-dev libfmt-dev libspdlog-dev \
+              libfreetype-dev libfribidi-dev \
               libgif-dev libgnutls28-dev libjpeg-dev \
               liblcms2-dev liblirc-dev liblzo2-dev libmicrohttpd-dev \
               libmariadb-dev libnfs-dev libpcre3-dev libpcre2-dev \
@@ -87,7 +88,9 @@ jobs:
               pkg-config --modversion flatbuffers || true && \
               echo "===== PCRE =====" && \
               pkg-config --modversion libpcre || true && \
-              pkg-config --modversion libpcre2-8 || true
+              pkg-config --modversion libpcre2-8 || true && \
+              echo "===== spdlog =====" && \
+              pkg-config --modversion spdlog || true
 
           WORKDIR /opt/src
 
