@@ -83,17 +83,7 @@ jobs:
               ffmpeg -filters | grep -Ei 'rga|scale' || true && \
               echo "===== MPP/RGA pkg-config =====" && \
               pkg-config --modversion rockchip_mpp || true && \
-              pkg-config --modversion librga || true && \
-              echo "===== FlatBuffers =====" && \
-              flatc --version && \
-              pkg-config --modversion flatbuffers || true && \
-              echo "===== PCRE =====" && \
-              pkg-config --modversion libpcre || true && \
-              pkg-config --modversion libpcre2-8 || true && \
-              echo "===== spdlog =====" && \
-              pkg-config --modversion spdlog || true && \
-              echo "===== libdisplay-info =====" && \
-              pkg-config --modversion libdisplay-info || true
+              pkg-config --modversion librga || true
 
           WORKDIR /opt/src
 
@@ -108,13 +98,12 @@ jobs:
                 -DCMAKE_INSTALL_PREFIX=${PREFIX} \
                 -DCORE_PLATFORM_NAME=gbm \
                 -DAPP_RENDER_SYSTEM=gles \
-                -DENABLE_X11=OFF \
-                -DENABLE_WAYLAND=OFF \
                 -DENABLE_INTERNAL_FFMPEG=OFF \
                 -DFFMPEG_PATH=/usr \
                 -DENABLE_INTERNAL_FSTRCMP=ON \
                 -DENABLE_NFS=ON \
                 -DENABLE_OPTICAL=ON \
+                -DENABLE_TESTING=OFF \
                 2>&1 | tee /tmp/kodi-cmake.log || \
               { cat /tmp/kodi-cmake.log; cat CMakeFiles/CMakeError.log || true; exit 1; }
 
