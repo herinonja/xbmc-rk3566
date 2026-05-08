@@ -9,6 +9,7 @@ on:
 jobs:
   build-kodi:
     runs-on: ubuntu-24.04
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -27,7 +28,7 @@ jobs:
           mkdir -p build-kodi-rk
 
           cat > build-kodi-rk/Dockerfile <<'EOF'
-          FROM arm64v8/ubuntu:noble
+          FROM arm64v8/ubuntu:noble AS build
 
           SHELL ["/bin/bash", "-c"]
 
@@ -73,15 +74,10 @@ jobs:
               uuid-dev zlib1g-dev libsystemd-dev doxygen graphviz texinfo \
               && rm -rf /var/lib/apt/lists/*
 
-          RUN echo "===== FFmpeg from PPA =====" && \
-              ffmpeg -version && \
-              echo "===== HW accels =====" && \
+          RUN ffmpeg -version && \
               ffmpeg -hwaccels || true && \
-              echo "===== RKMPP decoders =====" && \
               ffmpeg -decoders | grep -Ei 'rkmpp|h264|hevc|vp9' || true && \
-              echo "===== RGA filters =====" && \
               ffmpeg -filters | grep -Ei 'rga|scale' || true && \
-              echo "===== MPP/RGA pkg-config =====" && \
               pkg-config --modversion rockchip_mpp || true && \
               pkg-config --modversion librga || true
 
@@ -105,7 +101,7 @@ jobs:
                 -DENABLE_OPTICAL=ON \
                 -DENABLE_TESTING=OFF \
                 2>&1 | tee /tmp/kodi-cmake.log || \
-              { cat /tmp/kodi-cmake.log; cat CMakeFiles/CMakeError.log || true; exit 1; }
+              { cat /tmp/kodi-cmake.log; exit 1; }
 
           RUN cd build && \
               ninja && \
@@ -115,12 +111,16 @@ jobs:
               tar -C /opt/kodi-rk-root \
               -czf /out/kodi-omega-rk3566-ppa-rkmpp-rga-arm64.tar.gz .
 
+          FROM scratch AS artifact
+          COPY --from=build /out/ /
+
           EOF
 
-      - name: Build ARM64 Kodi with cache
+      - name: Build ARM64 Kodi artifact only
         run: |
           docker buildx build \
             --platform linux/arm64 \
+            --target artifact \
             --progress=plain \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
@@ -130,10 +130,10 @@ jobs:
       - name: List output
         run: |
           find output -type f -print
-          du -h output/**/*.tar.gz || true
+          du -h output/*.tar.gz || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: kodi-omega-rk3566-ppa-rkmpp-rga-arm64
-          path: output/**/*.tar.gz
+          path: output/*.tar.gz
