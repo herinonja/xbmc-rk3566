@@ -1,4 +1,4 @@
-name: Build Kodi Omega RK3566 DEB
+name: Build Kodi Omega RK3566 DEB for Armbian Trixie
 
 on:
   workflow_dispatch:
@@ -28,32 +28,25 @@ jobs:
           mkdir -p build-kodi-rk
 
           cat > build-kodi-rk/Dockerfile <<'EOF'
-          FROM arm64v8/ubuntu:noble AS build
+          FROM arm64v8/debian:trixie AS build
 
           SHELL ["/bin/bash", "-c"]
 
           ENV DEBIAN_FRONTEND=noninteractive
-          ENV PREFIX=/usr/local/kodi-rk
-          ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
-          ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/aarch64-linux-gnu:/usr/lib
-          ENV CMAKE_PREFIX_PATH=/usr/local:/usr
+          ENV KODI_PREFIX=/usr/local/kodi-rk
+          ENV FFMPEG_PREFIX=/usr/local/ffmpeg-rk
+          ENV PKG_CONFIG_PATH=/usr/local/ffmpeg-rk/lib/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+          ENV LD_LIBRARY_PATH=/usr/local/ffmpeg-rk/lib:/usr/local/lib:/usr/lib/aarch64-linux-gnu:/usr/lib
+          ENV CMAKE_PREFIX_PATH=/usr/local:/usr/local/ffmpeg-rk:/usr
 
           RUN apt-get update && apt-get install -y --no-install-recommends \
-              software-properties-common ca-certificates gnupg \
-              && add-apt-repository -y ppa:liujianfeng1994/rockchip-multimedia \
-              && apt-get update
-
-          RUN apt-get install -y --no-install-recommends \
               build-essential git cmake ninja-build pkg-config ccache \
               autoconf automake libtool libtool-bin gettext \
-              curl wget unzip zip python3 python3-dev python3-pip \
+              ca-certificates curl wget unzip zip \
+              python3 python3-dev python3-pip \
               yasm nasm gperf default-jre swig file patch meson \
-              dpkg-dev fakeroot file \
+              dpkg-dev fakeroot \
               flatbuffers-compiler libflatbuffers-dev rapidjson-dev \
-              ffmpeg \
-              libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev \
-              libswscale-dev libswresample-dev libpostproc-dev \
-              librga-dev librockchip-mpp-dev \
               libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
               libdisplay-info-dev \
               libwayland-dev wayland-protocols libxkbcommon-dev \
@@ -75,12 +68,78 @@ jobs:
               uuid-dev zlib1g-dev libsystemd-dev doxygen graphviz texinfo \
               && rm -rf /var/lib/apt/lists/*
 
-          RUN ffmpeg -version && \
-              ffmpeg -hwaccels || true && \
-              ffmpeg -decoders | grep -Ei 'rkmpp|h264|hevc|vp9' || true && \
-              ffmpeg -filters | grep -Ei 'rga|scale' || true && \
-              pkg-config --modversion rockchip_mpp || true && \
-              pkg-config --modversion librga || true
+          WORKDIR /opt/src
+
+          RUN git clone --depth=1 https://github.com/rockchip-linux/mpp.git && \
+              cmake -S mpp -B mpp/build -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/usr/local \
+                -DCMAKE_INSTALL_LIBDIR=lib && \
+              cmake --build mpp/build && \
+              cmake --install mpp/build && \
+              ldconfig
+
+          RUN mkdir -p /usr/local/lib/pkgconfig && \
+              printf '%s\n' \
+                'prefix=/usr/local' \
+                'exec_prefix=${prefix}' \
+                'libdir=${prefix}/lib' \
+                'includedir=${prefix}/include' \
+                '' \
+                'Name: rockchip_mpp' \
+                'Description: Rockchip Media Process Platform' \
+                'Version: 1.5.0' \
+                'Libs: -L${libdir} -lrockchip_mpp' \
+                'Cflags: -I${includedir}' \
+                > /usr/local/lib/pkgconfig/rockchip_mpp.pc
+
+          RUN git clone --depth=1 https://github.com/airockchip/librga.git && \
+              mkdir -p /usr/local/include/rga /usr/local/lib/pkgconfig && \
+              cp -a librga/include/* /usr/local/include/ || true && \
+              cp -a librga/include/*.h /usr/local/include/rga/ || true && \
+              cp -a librga/include/rga/* /usr/local/include/rga/ || true && \
+              test -f /usr/local/include/rga/RgaApi.h && \
+              RGA_SO="$(find librga/libs/Linux/gcc-aarch64 -name 'librga.so*' | head -n 1)" && \
+              test -n "${RGA_SO}" && \
+              cp -a "${RGA_SO}" /usr/local/lib/librga.so.2 && \
+              ln -sf librga.so.2 /usr/local/lib/librga.so && \
+              chmod 755 /usr/local/lib/librga.so* && \
+              printf '%s\n' \
+                'prefix=/usr/local' \
+                'exec_prefix=${prefix}' \
+                'libdir=${prefix}/lib' \
+                'includedir=${prefix}/include' \
+                '' \
+                'Name: librga' \
+                'Description: Rockchip RGA userspace library' \
+                'Version: 2.2.0' \
+                'Libs: -L${libdir} -lrga' \
+                'Cflags: -I${includedir}' \
+                > /usr/local/lib/pkgconfig/librga.pc && \
+              ldconfig
+
+          RUN git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg-rockchip
+
+          WORKDIR /opt/src/ffmpeg-rockchip
+
+          RUN ./configure \
+                --prefix=${FFMPEG_PREFIX} \
+                --enable-gpl \
+                --enable-version3 \
+                --enable-libdrm \
+                --enable-rkmpp \
+                --enable-rkrga \
+                --enable-shared \
+                --disable-static \
+                --disable-doc \
+                --disable-debug \
+              || { cat ffbuild/config.log; exit 1; }
+
+          RUN make -j"$(nproc)" && \
+              make install && \
+              ldconfig && \
+              ${FFMPEG_PREFIX}/bin/ffmpeg -version && \
+              ${FFMPEG_PREFIX}/bin/ffmpeg -hwaccels || true
 
           WORKDIR /opt/src
 
@@ -92,11 +151,11 @@ jobs:
               set -o pipefail && \
               cmake .. -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+                -DCMAKE_INSTALL_PREFIX=${KODI_PREFIX} \
                 -DCORE_PLATFORM_NAME=gbm \
                 -DAPP_RENDER_SYSTEM=gles \
                 -DENABLE_INTERNAL_FFMPEG=OFF \
-                -DFFMPEG_PATH=/usr \
+                -DFFMPEG_PATH=${FFMPEG_PREFIX} \
                 -DENABLE_INTERNAL_FSTRCMP=ON \
                 -DENABLE_NFS=ON \
                 -DENABLE_OPTICAL=ON \
@@ -108,20 +167,24 @@ jobs:
               ninja && \
               DESTDIR=/opt/kodi-rk-root ninja install
 
-          RUN mkdir -p /opt/kodi-rk-root/usr/local/kodi-rk/lib/runtime && \
-              ldd /opt/kodi-rk-root/usr/local/kodi-rk/lib/kodi/kodi-gbm \
-                | awk '/=> \// { print $3 }' \
-                | sort -u \
-                | xargs -r -I{} cp -v {} /opt/kodi-rk-root/usr/local/kodi-rk/lib/runtime/ && \
-              cp -av /usr/lib/aarch64-linux-gnu/libpython3.12.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/runtime/ || true && \
-              cp -av /usr/lib/python3.12 /opt/kodi-rk-root/usr/local/kodi-rk/lib/runtime/python3.12 || true
+          RUN mkdir -p /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip && \
+              cp -av ${FFMPEG_PREFIX}/lib/libavcodec.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av ${FFMPEG_PREFIX}/lib/libavformat.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av ${FFMPEG_PREFIX}/lib/libavfilter.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av ${FFMPEG_PREFIX}/lib/libavutil.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av ${FFMPEG_PREFIX}/lib/libswscale.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av ${FFMPEG_PREFIX}/lib/libswresample.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av ${FFMPEG_PREFIX}/lib/libpostproc.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av /usr/local/lib/librockchip_mpp.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/ && \
+              cp -av /usr/local/lib/librga.so* /opt/kodi-rk-root/usr/local/kodi-rk/lib/rockchip/
 
           RUN cat > /opt/kodi-rk-root/usr/local/kodi-rk/bin/kodi-rk <<'EOS' && \
               chmod +x /opt/kodi-rk-root/usr/local/kodi-rk/bin/kodi-rk
           #!/bin/sh
           export KODI_HOME=/usr/local/kodi-rk
-          export LD_LIBRARY_PATH="$KODI_HOME/lib/runtime:$KODI_HOME/lib:${LD_LIBRARY_PATH}"
-          export PYTHONHOME="$KODI_HOME/lib/runtime/python3.12"
+          unset PYTHONHOME
+          unset PYTHONPATH
+          export LD_LIBRARY_PATH="$KODI_HOME/lib/rockchip:$KODI_HOME/lib:${LD_LIBRARY_PATH}"
           exec "$KODI_HOME/lib/kodi/kodi-gbm" "$@"
           EOS
 
@@ -131,16 +194,16 @@ jobs:
           RUN mkdir -p /opt/kodi-rk-root/DEBIAN && \
               cat > /opt/kodi-rk-root/DEBIAN/control <<'EOF_CONTROL'
           Package: kodi-rk3566-omega
-          Version: 21.0-rk3566-1
+          Version: 21.0-rk3566-trixie-1
           Section: video
           Priority: optional
           Architecture: arm64
           Maintainer: herinonja
-          Depends: libc6, libstdc++6, libgcc-s1, ffmpeg, avahi-daemon
-          Description: Kodi Omega GBM/GLES for RK3566 with Rockchip FFmpeg runtime bundle
-           Custom Kodi Omega build for Radxa Zero 3W / RK3566.
-           Built against Rockchip FFmpeg, MPP and RGA userspace libraries.
-           Runtime libraries are bundled under /usr/local/kodi-rk/lib/runtime.
+          Depends: libc6, libstdc++6, libgcc-s1, python3, avahi-daemon
+          Description: Kodi Omega GBM/GLES for Radxa Zero 3W RK3566 on Armbian Trixie
+           Kodi Omega built on Debian Trixie ARM64 for Armbian Trixie.
+           Includes only Rockchip FFmpeg, MPP and RGA runtime libraries.
+           Uses system libraries for GLIBC, Python, PipeWire, GBM, EGL, DRM and audio.
           EOF_CONTROL
 
           RUN cat > /opt/kodi-rk-root/DEBIAN/postinst <<'EOF_POSTINST' && \
@@ -156,7 +219,7 @@ jobs:
 
           RUN dpkg-deb --build /opt/kodi-rk-root /out-kodi-rk3566-omega.deb && \
               mkdir -p /out && \
-              mv /out-kodi-rk3566-omega.deb /out/kodi-rk3566-omega_21.0-rk3566-1_arm64.deb
+              mv /out-kodi-rk3566-omega.deb /out/kodi-rk3566-omega_21.0-rk3566-trixie-1_arm64.deb
 
           FROM scratch AS artifact
           COPY --from=build /out/ /
@@ -181,5 +244,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kodi-rk3566-omega-deb
+          name: kodi-rk3566-omega-trixie-deb
           path: output/*.deb
