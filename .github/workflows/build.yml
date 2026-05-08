@@ -15,7 +15,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-3
+      PACKAGE_VERSION: 21.0-rk3566-trixie-4
       TARGET_ARCH: arm64
       INSTALL_PREFIX: /usr/local
       MAKEFLAGS: -j2
@@ -118,7 +118,8 @@ jobs:
             libxml2-dev \
             libxslt1-dev \
             libsqlite3-dev \
-            libmysqlclient-dev \
+            libmariadb-dev \
+            libmariadb-dev-compat \
             libcurl4-openssl-dev \
             libass-dev \
             libbluray-dev \
@@ -152,7 +153,6 @@ jobs:
             libvorbis-dev \
             libxkbcommon-dev \
             libxrandr-dev \
-            libxslt1-dev \
             uuid-dev \
             rapidjson-dev \
             flatbuffers-compiler \
@@ -173,7 +173,6 @@ jobs:
             libavahi-common-dev \
             libbluetooth-dev \
             libcap-dev \
-            libdav1d-dev \
             libdav1d-dev \
             libdvdnav-dev \
             libdvdread-dev \
@@ -199,7 +198,10 @@ jobs:
             libxfixes-dev \
             libxrender-dev \
             libxt-dev \
-            libxtst-dev
+            libxtst-dev \
+            libx264-dev \
+            libx265-dev \
+            libvpx-dev
 
           mkdir -p /build
           cd /build
@@ -388,7 +390,7 @@ jobs:
           Architecture: ${TARGET_ARCH}
           Installed-Size: ${INSTALLED_SIZE}
           Maintainer: RK3566 Kodi Builder <builder@example.com>
-          Depends: libc6, libstdc++6, libgcc-s1, libdrm2, libgbm1, libegl1, libgles2, libasound2, libpulse0, libudev1, libdbus-1-3, libcurl4, libssl3, zlib1g, libsqlite3-0, libxml2, libxslt1.1, libpng16-16, libjpeg62-turbo, libfreetype6, libfontconfig1, libfribidi0, libharfbuzz0b, libfmt10, libcrossguid0, libass9, libbluray2, libcdio19, libcec6, libmicrohttpd12, libnfs14, libsmbclient0, libtag1v5, libtinyxml2.6.2v5, libtinyxml2-10, libxkbcommon0, libinput10, libdisplay-info2, libavahi-client3, libavahi-common3, libbluetooth3, libcap2, libdav1d7, libdvdnav4, libdvdread8, libflac12, libgif7, liblzo2-2, libpcre3, libsamplerate0, libshairplay0, libvorbis0a, libvorbisenc2, libogg0
+          Depends: libc6, libstdc++6, libgcc-s1, libdrm2, libgbm1, libegl1, libgles2, libasound2, libpulse0, libudev1, libdbus-1-3, libcurl4, libssl3, zlib1g, libsqlite3-0, libxml2, libxslt1.1, libpng16-16, libjpeg62-turbo, libfreetype6, libfontconfig1, libfribidi0, libharfbuzz0b, libfmt10, libcrossguid0, libass9, libbluray2, libcdio19, libcec6, libmicrohttpd12, libnfs14, libsmbclient0, libtag1v5, libtinyxml2.6.2v5, libtinyxml2-10, libxkbcommon0, libinput10, libdisplay-info2, libavahi-client3, libavahi-common3, libbluetooth3, libcap2, libdav1d7, libdvdnav4, libdvdread8, libflac12, libgif7, liblzo2-2, libsamplerate0, libshairplay0, libvorbis0a, libvorbisenc2, libogg0, libmariadb3
           Provides: kodi
           Conflicts: kodi
           Replaces: kodi
