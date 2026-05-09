@@ -15,12 +15,12 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-9
+      PACKAGE_VERSION: 21.0-rk3566-trixie-10
       TARGET_ARCH: arm64
       MAKEFLAGS: -j2
       CCACHE_DIR: /workspace/.ccache
       PKG_CONFIG_PATH: /usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig
-      LD_LIBRARY_PATH: /usr/local/lib/aarch64-linux-gnu:/usr/local/lib
+      LD_LIBRARY_PATH: /usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu
 
     steps:
       - name: Checkout workflow repository
@@ -64,10 +64,10 @@ jobs:
           export CCACHE_DIR="/workspace/.ccache"
           export PKG_CONFIG="/usr/bin/pkg-config"
           export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
-          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib"
-          export CFLAGS="-I/usr/local/include -I/usr/local/include/rga"
-          export CXXFLAGS="-I/usr/local/include -I/usr/local/include/rga"
-          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib"
+          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu"
+          export CFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export CXXFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu"
 
           apt-get update
 
@@ -262,109 +262,154 @@ jobs:
 
           cd /build
 
-          echo "========== Install Rockchip librga from tsukumijima/librga-rockchip =========="
-          git clone --depth=1 https://github.com/tsukumijima/librga-rockchip.git
-          cd librga-rockchip
+          echo "========== Install Rockchip librga Debian packages from GitHub releases =========="
+          mkdir -p /build/rga-debs
+          cd /build/rga-debs
 
-          echo "Repository RGA layout:"
-          find . -maxdepth 8 -type f | sort | head -800
-
-          echo "========== Locate compatible Linux aarch64 librga.so =========="
-          find . -type f \( -name "librga.so" -o -name "librga.so.*" -o -name "librga.a" \) -print | sort | while read -r lib; do
-            echo "----- $lib"
-            file "$lib" || true
-            readelf -h "$lib" 2>/dev/null | grep -E "Class:|Machine:" || true
-          done
-
-          RGA_SO=""
-          while IFS= read -r candidate; do
-            INFO="$(file "$candidate" || true)"
-            echo "candidate: $candidate"
-            echo "file: $INFO"
-
-            if echo "$INFO" | grep -qi "ELF 64-bit" && echo "$INFO" | grep -Eqi "ARM aarch64|AArch64"; then
-              RGA_SO="$candidate"
-              break
-            fi
-          done < <(find . -type f \( -name "librga.so" -o -name "librga.so.*" \) | sort)
-
-          if [ -z "$RGA_SO" ]; then
-            echo "ERROR: No compatible ELF 64-bit ARM aarch64 librga.so found."
-            exit 1
-          fi
-
-          echo "Using compatible RGA library: $RGA_SO"
-          file "$RGA_SO"
-          readelf -h "$RGA_SO" | grep -E "Class:|Machine:"
-
-          mkdir -p /usr/local/include
-          mkdir -p /usr/local/include/rga
-          mkdir -p /usr/local/lib
-          mkdir -p /usr/local/lib/aarch64-linux-gnu
-          mkdir -p /usr/local/lib/pkgconfig
-          mkdir -p /usr/local/lib/aarch64-linux-gnu/pkgconfig
-
-          if [ -d include ]; then
-            cp -av include/*.h /usr/local/include/ || true
-            cp -av include/*.hpp /usr/local/include/ || true
-            cp -av include/*.h /usr/local/include/rga/ || true
-            cp -av include/*.hpp /usr/local/include/rga/ || true
-          fi
-
-          if [ -d usr/include ]; then
-            cp -av usr/include/*.h /usr/local/include/ || true
-            cp -av usr/include/*.hpp /usr/local/include/ || true
-            cp -av usr/include/rga/*.h /usr/local/include/rga/ || true
-            cp -av usr/include/rga/*.hpp /usr/local/include/rga/ || true
-          fi
-
-          if [ -d debian ]; then
-            find . -path "*/include/*" -type f \( -name "*.h" -o -name "*.hpp" \) -print | while read -r hdr; do
-              cp -av "$hdr" /usr/local/include/rga/ || true
-            done
-          fi
-
-          rm -f /usr/local/lib/librga.so /usr/local/lib/librga.so.* /usr/local/lib/librga.a
-          rm -f /usr/local/lib/aarch64-linux-gnu/librga.so /usr/local/lib/aarch64-linux-gnu/librga.so.* /usr/local/lib/aarch64-linux-gnu/librga.a
-
-          cp -av "$RGA_SO" /usr/local/lib/aarch64-linux-gnu/librga.so
-          ln -sf /usr/local/lib/aarch64-linux-gnu/librga.so /usr/local/lib/librga.so
-
-          chmod 0755 /usr/local/lib/aarch64-linux-gnu/librga.so || true
-
-          cat > /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc <<EOF_RGA_PC
-          prefix=/usr/local
-          exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib/aarch64-linux-gnu
-          includedir=\${prefix}/include
+          python3 - <<PY_RGA_DOWNLOAD
+          import json
+          import os
+          import urllib.request
           
-          Name: librga
-          Description: Rockchip RGA userspace library
-          Version: 1.10.5
-          Libs: -L\${libdir} -lrga
-          Libs.private: -ldl -lpthread
-          Cflags: -I\${includedir} -I\${includedir}/rga
-          EOF_RGA_PC
+          api = "https://api.github.com/repos/tsukumijima/librga-rockchip/releases/latest"
+          print(f"Fetching latest release metadata: {api}")
+          
+          req = urllib.request.Request(
+              api,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "github-actions-kodi-rk3566-builder",
+              },
+          )
+          
+          with urllib.request.urlopen(req, timeout=60) as response:
+              release = json.load(response)
+          
+          tag = release.get("tag_name", "unknown")
+          print(f"Latest librga-rockchip release: {tag}")
+          
+          assets = release.get("assets", [])
+          deb_assets = [
+              asset for asset in assets
+              if asset.get("name", "").endswith("_arm64.deb")
+          ]
+          
+          if not deb_assets:
+              print("Available assets:")
+              for asset in assets:
+                  print(" -", asset.get("name"), asset.get("browser_download_url"))
+              raise SystemExit("No *_arm64.deb assets found in latest librga-rockchip release")
+          
+          for asset in deb_assets:
+              name = asset["name"]
+              url = asset["browser_download_url"]
+              print(f"Downloading {name}")
+              urllib.request.urlretrieve(url, name)
+          
+          print("Downloaded arm64 deb assets:")
+          for name in sorted(os.listdir(".")):
+              if name.endswith(".deb"):
+                  print(" -", name)
+          PY_RGA_DOWNLOAD
 
-          cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/rga.pc
-          cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/pkgconfig/librga.pc
-          cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/pkgconfig/rga.pc
+          ls -lh /build/rga-debs/*.deb
+
+          echo "Installing librga arm64 Debian packages..."
+          apt-get install -y ./ ./*.deb || apt-get install -f -y
 
           /sbin/ldconfig || ldconfig || true
 
-          echo "========== Verify installed RGA =========="
+          echo "========== Verify installed RGA packages =========="
+          dpkg -l | grep -Ei "librga|rga" || true
+          dpkg -L librga2 2>/dev/null | sort || true
+          dpkg -L librga-dev 2>/dev/null | sort || true
+          dpkg -L librga-rockchip 2>/dev/null | sort || true
+          dpkg -L librga-rockchip-dev 2>/dev/null | sort || true
+
+          echo "========== Verify installed RGA files =========="
+          find /usr /usr/local -type f \( -name "librga.so" -o -name "librga.so.*" -o -name "librga.a" -o -name "librga.pc" -o -name "rga.pc" -o -name "im2d.h" -o -name "RgaApi.h" -o -name "rga.h" \) 2>/dev/null | sort || true
+
+          echo "========== RGA pkg-config status =========="
           export PKG_CONFIG="/usr/bin/pkg-config"
           export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
-          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib"
 
-          file /usr/local/lib/aarch64-linux-gnu/librga.so
-          readelf -h /usr/local/lib/aarch64-linux-gnu/librga.so | grep -E "Class:|Machine:"
+          pkg-config --list-all | grep -Ei "rga|rockchip" || true
+
+          if ! pkg-config --exists librga; then
+            echo "librga.pc was not found; creating compatibility pkg-config files from installed Debian package."
+
+            RGA_LIBDIR=""
+            if [ -f /usr/lib/aarch64-linux-gnu/librga.so ]; then
+              RGA_LIBDIR="/usr/lib/aarch64-linux-gnu"
+            elif [ -f /usr/local/lib/aarch64-linux-gnu/librga.so ]; then
+              RGA_LIBDIR="/usr/local/lib/aarch64-linux-gnu"
+            elif [ -f /usr/lib/librga.so ]; then
+              RGA_LIBDIR="/usr/lib"
+            elif [ -f /usr/local/lib/librga.so ]; then
+              RGA_LIBDIR="/usr/local/lib"
+            else
+              echo "ERROR: installed librga.so not found after installing RGA deb packages."
+              find /usr /usr/local -name "librga*" 2>/dev/null | sort || true
+              exit 1
+            fi
+
+            RGA_INCLUDEDIR="/usr/include"
+            if [ -d /usr/include/rga ]; then
+              RGA_INCLUDEDIR="/usr/include"
+            elif [ -d /usr/local/include/rga ]; then
+              RGA_INCLUDEDIR="/usr/local/include"
+            fi
+
+            mkdir -p /usr/local/lib/aarch64-linux-gnu/pkgconfig
+            mkdir -p /usr/local/lib/pkgconfig
+
+            cat > /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc <<EOF_RGA_PC
+            prefix=/usr
+            exec_prefix=\${prefix}
+            libdir=${RGA_LIBDIR}
+            includedir=${RGA_INCLUDEDIR}
+            
+            Name: librga
+            Description: Rockchip RGA userspace library
+            Version: 2.2.0
+            Libs: -L\${libdir} -lrga
+            Libs.private: -ldl -lpthread
+            Cflags: -I\${includedir} -I\${includedir}/rga
+            EOF_RGA_PC
+
+            cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/rga.pc
+            cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/pkgconfig/librga.pc
+            cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/pkgconfig/rga.pc
+          fi
+
           pkg-config --exists librga
           pkg-config --modversion librga
           pkg-config --cflags --libs librga
 
-          echo "========== Verify RGA headers =========="
-          find /usr/local/include -maxdepth 2 -type f | grep -Ei "rga|im2d|RgaApi|RockchipRga" | sort || true
+          echo "========== Verify RGA library architecture =========="
+          RGA_REAL_LIB="$(ldconfig -p | grep -E "librga\\.so" | awk "{print \$NF}" | head -n1 || true)"
+          if [ -z "$RGA_REAL_LIB" ]; then
+            RGA_REAL_LIB="$(find /usr /usr/local -type f \( -name "librga.so" -o -name "librga.so.*" \) 2>/dev/null | head -n1 || true)"
+          fi
+
+          if [ -z "$RGA_REAL_LIB" ]; then
+            echo "ERROR: cannot locate installed librga.so"
+            exit 1
+          fi
+
+          echo "Using installed RGA lib: $RGA_REAL_LIB"
+          file "$RGA_REAL_LIB"
+          readelf -h "$RGA_REAL_LIB" | grep -E "Class:|Machine:"
+
+          if ! file "$RGA_REAL_LIB" | grep -qi "ELF 64-bit"; then
+            echo "ERROR: installed RGA lib is not ELF 64-bit"
+            exit 1
+          fi
+
+          if ! file "$RGA_REAL_LIB" | grep -Eqi "ARM aarch64|AArch64"; then
+            echo "ERROR: installed RGA lib is not aarch64"
+            exit 1
+          fi
 
           echo "========== Verify RGA compile/link test =========="
           cat > /tmp/test-rga.c <<EOF_RGA_TEST
@@ -382,17 +427,18 @@ jobs:
           ldd /tmp/test-rga || true
           /tmp/test-rga || true
 
-          echo "========== Build and install ffmpeg-rockchip =========="
           cd /build
+
+          echo "========== Build and install ffmpeg-rockchip =========="
           git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git
           cd ffmpeg-rockchip
 
           export PKG_CONFIG="/usr/bin/pkg-config"
           export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
-          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib"
-          export CFLAGS="-I/usr/local/include -I/usr/local/include/rga"
-          export CXXFLAGS="-I/usr/local/include -I/usr/local/include/rga"
-          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib"
+          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu"
+          export CFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export CXXFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu"
 
           echo "pkg-config final check before ffmpeg configure:"
           pkg-config --exists librga
@@ -402,8 +448,8 @@ jobs:
           if ! ./configure \
             --prefix=/usr/local \
             --pkg-config=/usr/bin/pkg-config \
-            --extra-cflags="-I/usr/local/include -I/usr/local/include/rga" \
-            --extra-ldflags="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib" \
+            --extra-cflags="-I/usr/local/include -I/usr/include -I/usr/include/rga" \
+            --extra-ldflags="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu" \
             --extra-libs="-lrga -lpthread -lm -ldl" \
             --enable-gpl \
             --enable-version3 \
@@ -422,7 +468,7 @@ jobs:
             --enable-libmp3lame \
             --enable-openssl; then
             echo "========== ffmpeg configure failed; showing config.log tail and RGA checks =========="
-            grep -n -i -A20 -B20 "librga\|rkrga\|im2d\|RgaApi\|rga.h\|pkg-config" ffbuild/config.log || true
+            grep -n -i -A30 -B30 "librga\|rkrga\|im2d\|RgaApi\|rga.h\|pkg-config" ffbuild/config.log || true
             tail -300 ffbuild/config.log || true
             exit 1
           fi
@@ -490,8 +536,14 @@ jobs:
 
           cp -av /usr/local/lib/libmpp* "$PKGROOT/usr/local/lib/" || true
           cp -av /usr/local/lib/librockchip_mpp* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/aarch64-linux-gnu/librga* "$PKGROOT/usr/local/lib/aarch64-linux-gnu/" || true
-          cp -av /usr/local/lib/librga* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/aarch64-linux-gnu/libav*.so* "$PKGROOT/usr/local/lib/aarch64-linux-gnu/" || true
+          cp -av /usr/local/lib/aarch64-linux-gnu/libsw*.so* "$PKGROOT/usr/local/lib/aarch64-linux-gnu/" || true
+          cp -av /usr/local/lib/libav*.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libsw*.so* "$PKGROOT/usr/local/lib/" || true
+
+          if [ -n "${RGA_REAL_LIB:-}" ] && [ -f "$RGA_REAL_LIB" ]; then
+            cp -av "$RGA_REAL_LIB" "$PKGROOT/usr/local/lib/aarch64-linux-gnu/librga.so" || true
+          fi
 
           cat > "$PKGROOT/etc/ld.so.conf.d/kodi-rk3566.conf" <<EOF_LD_CONF
           /usr/local/lib/aarch64-linux-gnu
@@ -519,8 +571,8 @@ jobs:
            Custom Debian Trixie arm64 Kodi Omega build for Radxa Zero 3W / RK3566.
            Built with external ffmpeg-rockchip, Rockchip MPP and librga support.
           EOF_CONTROL
-
-          cat > "$PKGROOT/DEBIAN/postinst" <<EOF_POSTINST
+          
+                    cat > "$PKGROOT/DEBIAN/postinst" <<EOF_POSTINST
           #!/bin/sh
           set -e
           /sbin/ldconfig || ldconfig || true
