@@ -15,7 +15,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-5
+      PACKAGE_VERSION: 21.0-rk3566-trixie-6
       TARGET_ARCH: arm64
       INSTALL_PREFIX: /usr/local
       MAKEFLAGS: -j2
@@ -261,144 +261,183 @@ jobs:
 
           cd /build
 
-          echo "========== Build and install librga =========="
+          echo "========== Install Rockchip librga =========="
           git clone --depth=1 https://github.com/airockchip/librga.git
           cd librga
 
-          if [ -f CMakeLists.txt ]; then
-            cmake -S . -B build \
-              -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=/usr/local \
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          echo "Searching for prebuilt librga.so..."
+          find . -type f | sort | grep -Ei "librga\.so|librga\.a|include/(im2d|rga|Rga|Rockchip)" || true
 
-            cmake --build build -j2
-            cmake --install build
-          elif [ -f meson.build ]; then
-            meson setup build \
-              --prefix=/usr/local \
-              --buildtype=release
+          RGA_SO="$(find . -type f \( -name "librga.so" -o -name "librga.so.*" \) | grep -Ei "/libs/Linux/.*/(gcc-aarch64|aarch64|arm64|arm64-v8a)/" | head -n1 || true)"
 
-            ninja -C build -j2
-            ninja -C build install
-          else
-            echo "No CMakeLists.txt or meson.build found in librga repository"
-            find . -maxdepth 3 -type f | sort | head -200
+          if [ -z "$RGA_SO" ]; then
+            RGA_SO="$(find . -type f \( -name "librga.so" -o -name "librga.so.*" \) | grep -Ei "/libs/Linux/" | head -n1 || true)"
+          fi
+
+          if [ -z "$RGA_SO" ]; then
+            echo "ERROR: No Linux arm64 librga.so found in airockchip/librga."
+            echo "Repository layout:"
+            find . -maxdepth 6 -type f | sort | head -300
             exit 1
           fi
 
-          /sbin/ldconfig || ldconfig || true
+          echo "Using RGA library: $RGA_SO"
 
-          pkg-config --modversion librga || true
-          pkg-config --libs librga || true
-          ls -l /usr/local/lib/librga* 2>/dev/null || true
+          mkdir -p /usr/local/include/rga
+          mkdir -p /usr/local/lib
+          mkdir -p /usr/local/lib/pkgconfig
 
-          cd /build
+          cp -av include/*.h /usr/local/include/rga/
+          cp -av include/*.hpp /usr/local/include/rga/ || true
 
-          echo "========== Build and install ffmpeg-rockchip =========="
-          git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git
-          cd ffmpeg-rockchip
+          cp -av "$RGA_SO" /usr/local/lib/librga.so
 
-          ./configure \
-            --prefix=/usr/local \
-            --pkg-config-flags="--static" \
-            --extra-cflags="-I/usr/local/include" \
-            --extra-ldflags="-L/usr/local/lib -L/usr/local/lib/aarch64-linux-gnu" \
-            --extra-libs="-lpthread -lm" \
-            --enable-gpl \
-            --enable-version3 \
-            --enable-shared \
-            --disable-static \
-            --disable-debug \
-            --enable-libdrm \
-            --enable-rkmpp \
-            --enable-rkrga \
-            --enable-libdav1d \
-            --enable-libx264 \
-            --enable-libx265 \
-            --enable-libvpx \
-            --enable-libopus \
-            --enable-libvorbis \
-            --enable-libmp3lame \
-            --enable-openssl
+          if find . -type f -name "librga.a" | grep -q .; then
+            RGA_A="$(find . -type f -name "librga.a" | grep -Ei "/libs/Linux/" | head -n1 || true)"
+            if [ -n "$RGA_A" ]; then
+              cp -av "$RGA_A" /usr/local/lib/librga.a || true
+            fi
+          fi
 
-          make -j2
-          make install
+          chmod 0644 /usr/local/lib/librga.so || true
 
-          /sbin/ldconfig || ldconfig || true
-
-          ffmpeg -hide_banner -decoders | grep -Ei "rkmpp|h264|hevc" || true
-          ffmpeg -hide_banner -filters | grep -Ei "rga|scale" || true
-          pkg-config --modversion libavcodec
-          pkg-config --libs libavcodec
-
-          cd /build
-
-          echo "========== Build Kodi Omega =========="
-          git clone --branch Omega --depth=1 https://github.com/xbmc/xbmc.git kodi
-          cd kodi
-
-          mkdir -p build
-          cd build
-
-          cmake .. \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCORE_PLATFORM_NAME=gbm \
-            -DAPP_RENDER_SYSTEM=gles \
-            -DENABLE_X11=OFF \
-            -DENABLE_WAYLAND=OFF \
-            -DENABLE_INTERNAL_FFMPEG=OFF \
-            -DENABLE_INTERNAL_FLATBUFFERS=OFF \
-            -DENABLE_INTERNAL_FMT=OFF \
-            -DENABLE_INTERNAL_CROSSGUID=OFF \
-            -DENABLE_INTERNAL_FSTRCMP=OFF \
-            -DENABLE_INTERNAL_RapidJSON=OFF \
-            -DENABLE_AIRTUNES=ON \
-            -DENABLE_AVAHI=ON \
-            -DENABLE_BLUETOOTH=ON \
-            -DENABLE_DBUS=ON \
-            -DENABLE_OPTICAL=ON \
-            -DENABLE_PULSEAUDIO=ON \
-            -DENABLE_ALSA=ON \
-            -DENABLE_INTERNAL_DAV1D=OFF \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-
-          ninja -j2
-
-          echo "========== Install Kodi into package root =========="
-          PKGROOT="/build/pkgroot"
-          rm -rf "$PKGROOT"
-          DESTDIR="$PKGROOT" ninja install
-
-          echo "========== Add custom runtime libraries to package =========="
-          mkdir -p "$PKGROOT/usr/local/lib"
-          mkdir -p "$PKGROOT/etc/ld.so.conf.d"
-
-          cp -av /usr/local/lib/libpcre.so* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/libpcre16.so* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/libpcre32.so* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/libpcreposix.so* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/libpcrecpp.so* "$PKGROOT/usr/local/lib/" || true
-
-          cp -av /usr/local/lib/libmpp* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/librockchip_mpp* "$PKGROOT/usr/local/lib/" || true
-          cp -av /usr/local/lib/librga* "$PKGROOT/usr/local/lib/" || true
-
-          cat > "$PKGROOT/etc/ld.so.conf.d/kodi-rk3566.conf" <<EOF
+          cat > /usr/local/lib/pkgconfig/librga.pc <<EOF
+          prefix=/usr/local
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include/rga
+          
+          Name: librga
+          Description: Rockchip RGA userspace library
+          Version: 1.10.0
+          Libs: -L\${libdir} -lrga
+          Cflags: -I\${includedir}
+          EOF
+          
+                    cat > /usr/local/lib/pkgconfig/rga.pc <<EOF
+          prefix=/usr/local
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include/rga
+          
+          Name: rga
+          Description: Rockchip RGA userspace library
+          Version: 1.10.0
+          Libs: -L\${libdir} -lrga
+          Cflags: -I\${includedir}
+          EOF
+          
+                    /sbin/ldconfig || ldconfig || true
+          
+                    pkg-config --modversion librga
+                    pkg-config --libs librga
+                    pkg-config --cflags librga
+                    ls -l /usr/local/lib/librga* /usr/local/include/rga | head -100
+          
+                    cd /build
+          
+                    echo "========== Build and install ffmpeg-rockchip =========="
+                    git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git
+                    cd ffmpeg-rockchip
+          
+                    ./configure \
+                      --prefix=/usr/local \
+                      --extra-cflags="-I/usr/local/include -I/usr/local/include/rga" \
+                      --extra-ldflags="-L/usr/local/lib -L/usr/local/lib/aarch64-linux-gnu" \
+                      --extra-libs="-lpthread -lm -ldl" \
+                      --enable-gpl \
+                      --enable-version3 \
+                      --enable-shared \
+                      --disable-static \
+                      --disable-debug \
+                      --enable-libdrm \
+                      --enable-rkmpp \
+                      --enable-rkrga \
+                      --enable-libdav1d \
+                      --enable-libx264 \
+                      --enable-libx265 \
+                      --enable-libvpx \
+                      --enable-libopus \
+                      --enable-libvorbis \
+                      --enable-libmp3lame \
+                      --enable-openssl
+          
+                    make -j2
+                    make install
+          
+                    /sbin/ldconfig || ldconfig || true
+          
+                    ffmpeg -hide_banner -decoders | grep -Ei "rkmpp|h264|hevc" || true
+                    ffmpeg -hide_banner -filters | grep -Ei "rga|scale" || true
+                    pkg-config --modversion libavcodec
+                    pkg-config --libs libavcodec
+          
+                    cd /build
+          
+                    echo "========== Build Kodi Omega =========="
+                    git clone --branch Omega --depth=1 https://github.com/xbmc/xbmc.git kodi
+                    cd kodi
+          
+                    mkdir -p build
+                    cd build
+          
+                    cmake .. \
+                      -G Ninja \
+                      -DCMAKE_BUILD_TYPE=Release \
+                      -DCMAKE_INSTALL_PREFIX=/usr \
+                      -DCORE_PLATFORM_NAME=gbm \
+                      -DAPP_RENDER_SYSTEM=gles \
+                      -DENABLE_X11=OFF \
+                      -DENABLE_WAYLAND=OFF \
+                      -DENABLE_INTERNAL_FFMPEG=OFF \
+                      -DENABLE_INTERNAL_FLATBUFFERS=OFF \
+                      -DENABLE_INTERNAL_FMT=OFF \
+                      -DENABLE_INTERNAL_CROSSGUID=OFF \
+                      -DENABLE_INTERNAL_FSTRCMP=OFF \
+                      -DENABLE_INTERNAL_RapidJSON=OFF \
+                      -DENABLE_AIRTUNES=ON \
+                      -DENABLE_AVAHI=ON \
+                      -DENABLE_BLUETOOTH=ON \
+                      -DENABLE_DBUS=ON \
+                      -DENABLE_OPTICAL=ON \
+                      -DENABLE_PULSEAUDIO=ON \
+                      -DENABLE_ALSA=ON \
+                      -DENABLE_INTERNAL_DAV1D=OFF \
+                      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          
+                    ninja -j2
+          
+                    echo "========== Install Kodi into package root =========="
+                    PKGROOT="/build/pkgroot"
+                    rm -rf "$PKGROOT"
+                    DESTDIR="$PKGROOT" ninja install
+          
+                    echo "========== Add custom runtime libraries to package =========="
+                    mkdir -p "$PKGROOT/usr/local/lib"
+                    mkdir -p "$PKGROOT/etc/ld.so.conf.d"
+          
+                    cp -av /usr/local/lib/libpcre.so* "$PKGROOT/usr/local/lib/" || true
+                    cp -av /usr/local/lib/libpcre16.so* "$PKGROOT/usr/local/lib/" || true
+                    cp -av /usr/local/lib/libpcre32.so* "$PKGROOT/usr/local/lib/" || true
+                    cp -av /usr/local/lib/libpcreposix.so* "$PKGROOT/usr/local/lib/" || true
+                    cp -av /usr/local/lib/libpcrecpp.so* "$PKGROOT/usr/local/lib/" || true
+          
+                    cp -av /usr/local/lib/libmpp* "$PKGROOT/usr/local/lib/" || true
+                    cp -av /usr/local/lib/librockchip_mpp* "$PKGROOT/usr/local/lib/" || true
+                    cp -av /usr/local/lib/librga* "$PKGROOT/usr/local/lib/" || true
+          
+                    cat > "$PKGROOT/etc/ld.so.conf.d/kodi-rk3566.conf" <<EOF
           /usr/local/lib
           /usr/local/lib/aarch64-linux-gnu
           EOF
-          
-                    echo "========== Create Debian package metadata =========="
-                    mkdir -p "$PKGROOT/DEBIAN"
-          
-                    INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
-          
-                    cat > "$PKGROOT/DEBIAN/control" <<EOF
+
+          echo "========== Create Debian package metadata =========="
+          mkdir -p "$PKGROOT/DEBIAN"
+
+          INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
+
+          cat > "$PKGROOT/DEBIAN/control" <<EOF
           Package: ${PACKAGE_NAME}
           Version: ${PACKAGE_VERSION}
           Section: video
@@ -414,8 +453,8 @@ jobs:
            Custom Debian Trixie arm64 Kodi Omega build for Radxa Zero 3W / RK3566.
            Built with external ffmpeg-rockchip, Rockchip MPP and librga support.
           EOF
-          
-                    cat > "$PKGROOT/DEBIAN/postinst" <<EOF
+
+          cat > "$PKGROOT/DEBIAN/postinst" <<EOF
           #!/bin/sh
           set -e
           /sbin/ldconfig || ldconfig || true
