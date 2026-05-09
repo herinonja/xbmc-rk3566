@@ -15,12 +15,12 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-12
+      PACKAGE_VERSION: 21.0-rk3566-trixie-13
       TARGET_ARCH: arm64
       MAKEFLAGS: -j2
       CCACHE_DIR: /workspace/.ccache
       PKG_CONFIG_PATH: /usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig
-      LD_LIBRARY_PATH: /usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu
+      LD_LIBRARY_PATH: /usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu
 
     steps:
       - name: Checkout workflow repository
@@ -64,10 +64,10 @@ jobs:
           export CCACHE_DIR="/workspace/.ccache"
           export PKG_CONFIG="/usr/bin/pkg-config"
           export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
-          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu"
+          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu"
           export CFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
           export CXXFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
-          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu -L/lib/aarch64-linux-gnu"
 
           apt-get update
 
@@ -328,7 +328,7 @@ jobs:
           dpkg -L librga-rockchip-dev 2>/dev/null | sort || true
 
           echo "========== Verify installed RGA files =========="
-          find /usr /usr/local -type f \( \
+          find /usr /usr/local /lib -type f \( \
             -name "librga.so" -o \
             -name "librga.so.*" -o \
             -name "librga.a" -o \
@@ -354,6 +354,11 @@ jobs:
             elif ls /usr/lib/aarch64-linux-gnu/librga.so.* >/dev/null 2>&1; then
               RGA_LIBDIR="/usr/lib/aarch64-linux-gnu"
               ln -sf "$(ls /usr/lib/aarch64-linux-gnu/librga.so.* | head -n1)" /usr/lib/aarch64-linux-gnu/librga.so
+            elif [ -f /lib/aarch64-linux-gnu/librga.so ]; then
+              RGA_LIBDIR="/lib/aarch64-linux-gnu"
+            elif ls /lib/aarch64-linux-gnu/librga.so.* >/dev/null 2>&1; then
+              RGA_LIBDIR="/lib/aarch64-linux-gnu"
+              ln -sf "$(ls /lib/aarch64-linux-gnu/librga.so.* | head -n1)" /lib/aarch64-linux-gnu/librga.so
             elif [ -f /usr/local/lib/aarch64-linux-gnu/librga.so ]; then
               RGA_LIBDIR="/usr/local/lib/aarch64-linux-gnu"
             elif ls /usr/local/lib/aarch64-linux-gnu/librga.so.* >/dev/null 2>&1; then
@@ -365,7 +370,7 @@ jobs:
               RGA_LIBDIR="/usr/local/lib"
             else
               echo "ERROR: installed librga.so not found after installing RGA deb packages."
-              find /usr /usr/local -name "librga*" 2>/dev/null | sort || true
+              find /usr /usr/local /lib -name "librga*" 2>/dev/null | sort || true
               exit 1
             fi
 
@@ -427,7 +432,7 @@ jobs:
           echo "========== Verify RGA library architecture =========="
           RGA_REAL_LIB="$(ldconfig -p | grep -E "librga\\.so" | awk "{print \$NF}" | head -n1 || true)"
           if [ -z "$RGA_REAL_LIB" ]; then
-            RGA_REAL_LIB="$(find /usr /usr/local -type f \( -name "librga.so" -o -name "librga.so.*" \) 2>/dev/null | head -n1 || true)"
+            RGA_REAL_LIB="$(find /usr /usr/local /lib -type f \( -name "librga.so" -o -name "librga.so.*" \) 2>/dev/null | head -n1 || true)"
           fi
 
           if [ -z "$RGA_REAL_LIB" ]; then
@@ -435,17 +440,27 @@ jobs:
             exit 1
           fi
 
-          echo "Using installed RGA lib: $RGA_REAL_LIB"
-          file "$RGA_REAL_LIB"
-          readelf -h "$RGA_REAL_LIB" | grep -E "Class:|Machine:"
+          RGA_REAL_LIB_RESOLVED="$(readlink -f "$RGA_REAL_LIB")"
 
-          if ! file "$RGA_REAL_LIB" | grep -qi "ELF 64-bit"; then
-            echo "ERROR: installed RGA lib is not ELF 64-bit"
+          if [ -z "$RGA_REAL_LIB_RESOLVED" ] || [ ! -f "$RGA_REAL_LIB_RESOLVED" ]; then
+            echo "ERROR: cannot resolve installed librga symlink: $RGA_REAL_LIB"
             exit 1
           fi
 
-          if ! file "$RGA_REAL_LIB" | grep -Eqi "ARM aarch64|AArch64"; then
-            echo "ERROR: installed RGA lib is not aarch64"
+          echo "Using installed RGA lib: $RGA_REAL_LIB"
+          echo "Resolved installed RGA lib: $RGA_REAL_LIB_RESOLVED"
+
+          file "$RGA_REAL_LIB"
+          file "$RGA_REAL_LIB_RESOLVED"
+          readelf -h "$RGA_REAL_LIB_RESOLVED" | grep -E "Class:|Machine:"
+
+          if ! file "$RGA_REAL_LIB_RESOLVED" | grep -qi "ELF 64-bit"; then
+            echo "ERROR: installed RGA lib target is not ELF 64-bit"
+            exit 1
+          fi
+
+          if ! readelf -h "$RGA_REAL_LIB_RESOLVED" | grep -qi "AArch64"; then
+            echo "ERROR: installed RGA lib target is not AArch64"
             exit 1
           fi
 
@@ -473,10 +488,10 @@ jobs:
 
           export PKG_CONFIG="/usr/bin/pkg-config"
           export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
-          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu"
+          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu"
           export CFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
           export CXXFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
-          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu -L/lib/aarch64-linux-gnu"
 
           echo "pkg-config final check before ffmpeg configure:"
           pkg-config --exists librga
@@ -487,7 +502,7 @@ jobs:
             --prefix=/usr/local \
             --pkg-config=/usr/bin/pkg-config \
             --extra-cflags="-I/usr/local/include -I/usr/include -I/usr/include/rga" \
-            --extra-ldflags="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu" \
+            --extra-ldflags="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu -L/lib/aarch64-linux-gnu" \
             --extra-libs="-lrga -lpthread -lm -ldl" \
             --enable-gpl \
             --enable-version3 \
@@ -579,21 +594,23 @@ jobs:
           cp -av /usr/local/lib/libav*.so* "$PKGROOT/usr/local/lib/" || true
           cp -av /usr/local/lib/libsw*.so* "$PKGROOT/usr/local/lib/" || true
 
-          if [ -n "${RGA_REAL_LIB:-}" ] && [ -f "$RGA_REAL_LIB" ]; then
-            cp -av "$RGA_REAL_LIB" "$PKGROOT/usr/local/lib/aarch64-linux-gnu/librga.so" || true
+          if [ -n "${RGA_REAL_LIB_RESOLVED:-}" ] && [ -f "$RGA_REAL_LIB_RESOLVED" ]; then
+            cp -av "$RGA_REAL_LIB_RESOLVED" "$PKGROOT/usr/local/lib/aarch64-linux-gnu/librga.so.2.2.0" || true
+            ln -sf librga.so.2.2.0 "$PKGROOT/usr/local/lib/aarch64-linux-gnu/librga.so.2" || true
+            ln -sf librga.so.2.2.0 "$PKGROOT/usr/local/lib/aarch64-linux-gnu/librga.so" || true
           fi
 
           cat > "$PKGROOT/etc/ld.so.conf.d/kodi-rk3566.conf" <<EOF_LD_CONF
           /usr/local/lib/aarch64-linux-gnu
           /usr/local/lib
           EOF_LD_CONF
-
-          echo "========== Create Debian package metadata =========="
-          mkdir -p "$PKGROOT/DEBIAN"
-
-          INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
-
-          cat > "$PKGROOT/DEBIAN/control" <<EOF_CONTROL
+          
+                    echo "========== Create Debian package metadata =========="
+                    mkdir -p "$PKGROOT/DEBIAN"
+          
+                    INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
+          
+                    cat > "$PKGROOT/DEBIAN/control" <<EOF_CONTROL
           Package: ${PACKAGE_NAME}
           Version: ${PACKAGE_VERSION}
           Section: video
