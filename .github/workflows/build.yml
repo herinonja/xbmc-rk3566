@@ -15,7 +15,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-7
+      PACKAGE_VERSION: 21.0-rk3566-trixie-8
       TARGET_ARCH: arm64
       INSTALL_PREFIX: /usr/local
       MAKEFLAGS: -j2
@@ -267,24 +267,42 @@ jobs:
           cd librga
 
           echo "Repository RGA layout:"
-          find . -maxdepth 6 -type f | sort | head -400
+          find . -maxdepth 8 -type f | sort | head -600
 
-          echo "Searching for Linux arm64 librga.so..."
-          RGA_SO="$(find . -type f \( -name "librga.so" -o -name "librga.so.*" \) | grep -Ei "/libs/Linux/.*/(aarch64|arm64|gcc-aarch64|arm64-v8a)/" | head -n1 || true)"
+          echo "========== Scan all RGA libraries with architecture =========="
+          find . -type f \( -name "librga.so" -o -name "librga.so.*" -o -name "librga.a" \) -print | sort | while read -r lib; do
+            echo "----- $lib"
+            file "$lib" || true
+            readelf -h "$lib" 2>/dev/null | grep -E "Class:|Machine:" || true
+          done
+
+          echo "========== Select ELF 64-bit ARM aarch64 librga.so =========="
+          RGA_SO=""
+          while IFS= read -r candidate; do
+            INFO="$(file "$candidate" || true)"
+            echo "candidate: $candidate"
+            echo "file: $INFO"
+
+            if echo "$INFO" | grep -qi "ELF 64-bit" && echo "$INFO" | grep -Eqi "ARM aarch64|AArch64"; then
+              RGA_SO="$candidate"
+              break
+            fi
+          done < <(find . -type f \( -name "librga.so" -o -name "librga.so.*" \) | sort)
 
           if [ -z "$RGA_SO" ]; then
-            RGA_SO="$(find . -type f \( -name "librga.so" -o -name "librga.so.*" \) | grep -Ei "/libs/Linux/" | head -n1 || true)"
-          fi
-
-          if [ -z "$RGA_SO" ]; then
-            echo "ERROR: No Linux librga.so found in airockchip/librga."
-            echo "Full library search:"
-            find . -type f | grep -Ei "librga|rga.*\\.so|\\.so$|\\.a$" || true
+            echo "ERROR: No compatible ELF 64-bit ARM aarch64 librga.so found."
+            echo "Available RGA library files:"
+            find . -type f \( -name "librga.so" -o -name "librga.so.*" -o -name "librga.a" \) -print | sort | while read -r lib; do
+              echo "----- $lib"
+              file "$lib" || true
+              readelf -h "$lib" 2>/dev/null | grep -E "Class:|Machine:" || true
+            done
             exit 1
           fi
 
-          echo "Using RGA library: $RGA_SO"
-          file "$RGA_SO" || true
+          echo "Using compatible RGA library: $RGA_SO"
+          file "$RGA_SO"
+          readelf -h "$RGA_SO" | grep -E "Class:|Machine:"
 
           mkdir -p /usr/local/include
           mkdir -p /usr/local/include/rga
@@ -298,19 +316,14 @@ jobs:
           cp -av include/*.h /usr/local/include/rga/
           cp -av include/*.hpp /usr/local/include/rga/ || true
 
+          rm -f /usr/local/lib/librga.so /usr/local/lib/librga.so.* /usr/local/lib/librga.a
+          rm -f /usr/local/lib/aarch64-linux-gnu/librga.so /usr/local/lib/aarch64-linux-gnu/librga.so.* /usr/local/lib/aarch64-linux-gnu/librga.a
+
           cp -av "$RGA_SO" /usr/local/lib/librga.so
           cp -av "$RGA_SO" /usr/local/lib/aarch64-linux-gnu/librga.so
 
-          chmod 0644 /usr/local/lib/librga.so || true
-          chmod 0644 /usr/local/lib/aarch64-linux-gnu/librga.so || true
-
-          if find . -type f -name "librga.a" | grep -q .; then
-            RGA_A="$(find . -type f -name "librga.a" | grep -Ei "/libs/Linux/" | head -n1 || true)"
-            if [ -n "$RGA_A" ]; then
-              cp -av "$RGA_A" /usr/local/lib/librga.a || true
-              cp -av "$RGA_A" /usr/local/lib/aarch64-linux-gnu/librga.a || true
-            fi
-          fi
+          chmod 0755 /usr/local/lib/librga.so || true
+          chmod 0755 /usr/local/lib/aarch64-linux-gnu/librga.so || true
 
           cat > /tmp/librga.pc <<EOF_RGA_PC
           prefix=/usr/local
@@ -325,17 +338,38 @@ jobs:
           Libs.private: -ldl -lpthread
           Cflags: -I\${includedir} -I\${includedir}/rga
           EOF_RGA_PC
+          
+                    cat > /tmp/librga-aarch64.pc <<EOF_RGA_PC_AARCH64
+          prefix=/usr/local
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib/aarch64-linux-gnu
+          includedir=\${prefix}/include
+          
+          Name: librga
+          Description: Rockchip RGA userspace library
+          Version: 2.3.0
+          Libs: -L\${libdir} -lrga
+          Libs.private: -ldl -lpthread
+          Cflags: -I\${includedir} -I\${includedir}/rga
+          EOF_RGA_PC_AARCH64
 
           cp -av /tmp/librga.pc /usr/local/lib/pkgconfig/librga.pc
           cp -av /tmp/librga.pc /usr/local/lib/pkgconfig/rga.pc
-          cp -av /tmp/librga.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc
-          cp -av /tmp/librga.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/rga.pc
+          cp -av /tmp/librga-aarch64.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc
+          cp -av /tmp/librga-aarch64.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/rga.pc
 
           /sbin/ldconfig || ldconfig || true
 
+          echo "========== Verify installed RGA library architecture =========="
+          file /usr/local/lib/librga.so
+          file /usr/local/lib/aarch64-linux-gnu/librga.so
+          readelf -h /usr/local/lib/librga.so | grep -E "Class:|Machine:"
+          readelf -h /usr/local/lib/aarch64-linux-gnu/librga.so | grep -E "Class:|Machine:"
+
           echo "========== Verify librga pkg-config =========="
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
-          pkg-config --debug --exists librga 2>&1 | tail -80 || true
+          export PKG_CONFIG="/usr/bin/pkg-config"
+          export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
+
           pkg-config --exists librga
           pkg-config --modversion librga
           pkg-config --cflags librga
@@ -352,12 +386,13 @@ jobs:
           #include <RgaApi.h>
           #include <im2d.h>
           int main(void) {
-            printf("rga headers ok\n");
+            printf("rga headers/link ok\n");
             return 0;
           }
           EOF_RGA_TEST
 
           gcc /tmp/test-rga.c -o /tmp/test-rga $(pkg-config --cflags --libs librga)
+          ldd /tmp/test-rga || true
           /tmp/test-rga || true
 
           ls -l /usr/local/lib/librga* /usr/local/lib/aarch64-linux-gnu/librga* || true
@@ -370,11 +405,11 @@ jobs:
           cd ffmpeg-rockchip
 
           export PKG_CONFIG="/usr/bin/pkg-config"
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
+          export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
           export LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib/aarch64-linux-gnu"
           export CFLAGS="-I/usr/local/include -I/usr/local/include/rga"
           export CXXFLAGS="-I/usr/local/include -I/usr/local/include/rga"
-          export LDFLAGS="-L/usr/local/lib -L/usr/local/lib/aarch64-linux-gnu"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib"
 
           echo "pkg-config final check before ffmpeg configure:"
           pkg-config --exists librga
@@ -384,7 +419,7 @@ jobs:
           if ! ./configure \
             --prefix=/usr/local \
             --extra-cflags="-I/usr/local/include -I/usr/local/include/rga" \
-            --extra-ldflags="-L/usr/local/lib -L/usr/local/lib/aarch64-linux-gnu" \
+            --extra-ldflags="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib" \
             --extra-libs="-lpthread -lm -ldl" \
             --enable-gpl \
             --enable-version3 \
@@ -500,8 +535,8 @@ jobs:
            Custom Debian Trixie arm64 Kodi Omega build for Radxa Zero 3W / RK3566.
            Built with external ffmpeg-rockchip, Rockchip MPP and librga support.
           EOF_CONTROL
-          
-                    cat > "$PKGROOT/DEBIAN/postinst" <<EOF_POSTINST
+
+          cat > "$PKGROOT/DEBIAN/postinst" <<EOF_POSTINST
           #!/bin/sh
           set -e
           /sbin/ldconfig || ldconfig || true
