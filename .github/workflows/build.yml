@@ -15,7 +15,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-11
+      PACKAGE_VERSION: 21.0-rk3566-trixie-12
       TARGET_ARCH: arm64
       MAKEFLAGS: -j2
       CCACHE_DIR: /workspace/.ccache
@@ -389,18 +389,22 @@ jobs:
           libdir = os.environ["RGA_LIBDIR"]
           includedir = os.environ["RGA_INCLUDEDIR"]
           
-          content = f"""prefix=/usr
-          exec_prefix=${{prefix}}
-          libdir={libdir}
-          includedir={includedir}
+          lines = [
+              "prefix=/usr",
+              "exec_prefix=${prefix}",
+              f"libdir={libdir}",
+              f"includedir={includedir}",
+              "",
+              "Name: librga",
+              "Description: Rockchip RGA userspace library",
+              "Version: 2.2.0",
+              "Libs: -L${libdir} -lrga",
+              "Libs.private: -ldl -lpthread",
+              "Cflags: -I${includedir} -I${includedir}/rga",
+              "",
+          ]
           
-          Name: librga
-          Description: Rockchip RGA userspace library
-          Version: 2.2.0
-          Libs: -L${{libdir}} -lrga
-          Libs.private: -ldl -lpthread
-          Cflags: -I${{includedir}} -I${{includedir}}/rga
-          """
+          content = "\\n".join(lines)
           
           targets = [
               Path("/usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc"),
@@ -414,39 +418,39 @@ jobs:
               target.write_text(content)
               print(f"wrote {target}")
           PY_RGA_PC
-                    fi
-          
-                    pkg-config --exists librga
-                    pkg-config --modversion librga
-                    pkg-config --cflags --libs librga
-          
-                    echo "========== Verify RGA library architecture =========="
-                    RGA_REAL_LIB="$(ldconfig -p | grep -E "librga\\.so" | awk "{print \$NF}" | head -n1 || true)"
-                    if [ -z "$RGA_REAL_LIB" ]; then
-                      RGA_REAL_LIB="$(find /usr /usr/local -type f \( -name "librga.so" -o -name "librga.so.*" \) 2>/dev/null | head -n1 || true)"
-                    fi
-          
-                    if [ -z "$RGA_REAL_LIB" ]; then
-                      echo "ERROR: cannot locate installed librga.so"
-                      exit 1
-                    fi
-          
-                    echo "Using installed RGA lib: $RGA_REAL_LIB"
-                    file "$RGA_REAL_LIB"
-                    readelf -h "$RGA_REAL_LIB" | grep -E "Class:|Machine:"
-          
-                    if ! file "$RGA_REAL_LIB" | grep -qi "ELF 64-bit"; then
-                      echo "ERROR: installed RGA lib is not ELF 64-bit"
-                      exit 1
-                    fi
-          
-                    if ! file "$RGA_REAL_LIB" | grep -Eqi "ARM aarch64|AArch64"; then
-                      echo "ERROR: installed RGA lib is not aarch64"
-                      exit 1
-                    fi
-          
-                    echo "========== Verify RGA compile/link test =========="
-                    cat > /tmp/test-rga.c <<EOF_RGA_TEST
+          fi
+
+          pkg-config --exists librga
+          pkg-config --modversion librga
+          pkg-config --cflags --libs librga
+
+          echo "========== Verify RGA library architecture =========="
+          RGA_REAL_LIB="$(ldconfig -p | grep -E "librga\\.so" | awk "{print \$NF}" | head -n1 || true)"
+          if [ -z "$RGA_REAL_LIB" ]; then
+            RGA_REAL_LIB="$(find /usr /usr/local -type f \( -name "librga.so" -o -name "librga.so.*" \) 2>/dev/null | head -n1 || true)"
+          fi
+
+          if [ -z "$RGA_REAL_LIB" ]; then
+            echo "ERROR: cannot locate installed librga.so"
+            exit 1
+          fi
+
+          echo "Using installed RGA lib: $RGA_REAL_LIB"
+          file "$RGA_REAL_LIB"
+          readelf -h "$RGA_REAL_LIB" | grep -E "Class:|Machine:"
+
+          if ! file "$RGA_REAL_LIB" | grep -qi "ELF 64-bit"; then
+            echo "ERROR: installed RGA lib is not ELF 64-bit"
+            exit 1
+          fi
+
+          if ! file "$RGA_REAL_LIB" | grep -Eqi "ARM aarch64|AArch64"; then
+            echo "ERROR: installed RGA lib is not aarch64"
+            exit 1
+          fi
+
+          echo "========== Verify RGA compile/link test =========="
+          cat > /tmp/test-rga.c <<EOF_RGA_TEST
           #include <stdio.h>
           #include <rga.h>
           #include <RgaApi.h>
@@ -583,13 +587,13 @@ jobs:
           /usr/local/lib/aarch64-linux-gnu
           /usr/local/lib
           EOF_LD_CONF
-          
-                    echo "========== Create Debian package metadata =========="
-                    mkdir -p "$PKGROOT/DEBIAN"
-          
-                    INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
-          
-                    cat > "$PKGROOT/DEBIAN/control" <<EOF_CONTROL
+
+          echo "========== Create Debian package metadata =========="
+          mkdir -p "$PKGROOT/DEBIAN"
+
+          INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
+
+          cat > "$PKGROOT/DEBIAN/control" <<EOF_CONTROL
           Package: ${PACKAGE_NAME}
           Version: ${PACKAGE_VERSION}
           Section: video
