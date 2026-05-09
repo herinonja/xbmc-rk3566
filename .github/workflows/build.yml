@@ -15,7 +15,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-4
+      PACKAGE_VERSION: 21.0-rk3566-trixie-5
       TARGET_ARCH: arm64
       INSTALL_PREFIX: /usr/local
       MAKEFLAGS: -j2
@@ -62,7 +62,7 @@ jobs:
             arm64v8/debian:trixie \
             bash -euxo pipefail -c '
 
-          export PATH="/usr/lib/ccache:/usr/local/bin:/usr/bin:/bin"
+          export PATH="/usr/lib/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
           export CCACHE_DIR="/workspace/.ccache"
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
           export LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib/aarch64-linux-gnu"
@@ -73,6 +73,7 @@ jobs:
           apt-get update
 
           apt-get install -y --no-install-recommends \
+            libc-bin \
             build-essential \
             git \
             ca-certificates \
@@ -203,6 +204,9 @@ jobs:
             libx265-dev \
             libvpx-dev
 
+          command -v ldconfig || true
+          ls -l /sbin/ldconfig /usr/sbin/ldconfig 2>/dev/null || true
+
           mkdir -p /build
           cd /build
 
@@ -226,9 +230,11 @@ jobs:
 
           make -j2
           make install
-          ldconfig
+
+          /sbin/ldconfig || ldconfig || true
 
           pkg-config --modversion libpcre || pkg-config --modversion pcre
+          ls -l /usr/local/lib/libpcre* || true
 
           cd /build
 
@@ -246,10 +252,12 @@ jobs:
 
           cmake --build build -j2
           cmake --install build
-          ldconfig
+
+          /sbin/ldconfig || ldconfig || true
 
           pkg-config --modversion rockchip_mpp || true
           pkg-config --libs rockchip_mpp || true
+          ls -l /usr/local/lib/libmpp* /usr/local/lib/librockchip_mpp* 2>/dev/null || true
 
           cd /build
 
@@ -280,10 +288,11 @@ jobs:
             exit 1
           fi
 
-          ldconfig
+          /sbin/ldconfig || ldconfig || true
 
           pkg-config --modversion librga || true
           pkg-config --libs librga || true
+          ls -l /usr/local/lib/librga* 2>/dev/null || true
 
           cd /build
 
@@ -316,7 +325,8 @@ jobs:
 
           make -j2
           make install
-          ldconfig
+
+          /sbin/ldconfig || ldconfig || true
 
           ffmpeg -hide_banner -decoders | grep -Ei "rkmpp|h264|hevc" || true
           ffmpeg -hide_banner -filters | grep -Ei "rga|scale" || true
@@ -364,72 +374,78 @@ jobs:
           rm -rf "$PKGROOT"
           DESTDIR="$PKGROOT" ninja install
 
-          echo "========== Add Rockchip runtime libraries to package =========="
+          echo "========== Add custom runtime libraries to package =========="
           mkdir -p "$PKGROOT/usr/local/lib"
           mkdir -p "$PKGROOT/etc/ld.so.conf.d"
+
+          cp -av /usr/local/lib/libpcre.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcre16.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcre32.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcreposix.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcrecpp.so* "$PKGROOT/usr/local/lib/" || true
 
           cp -av /usr/local/lib/libmpp* "$PKGROOT/usr/local/lib/" || true
           cp -av /usr/local/lib/librockchip_mpp* "$PKGROOT/usr/local/lib/" || true
           cp -av /usr/local/lib/librga* "$PKGROOT/usr/local/lib/" || true
 
           cat > "$PKGROOT/etc/ld.so.conf.d/kodi-rk3566.conf" <<EOF
-          /usr/local/lib
-          /usr/local/lib/aarch64-linux-gnu
-          EOF
-          
-                    echo "========== Create Debian package metadata =========="
-                    mkdir -p "$PKGROOT/DEBIAN"
-          
-                    INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
-          
-                    cat > "$PKGROOT/DEBIAN/control" <<EOF
-          Package: ${PACKAGE_NAME}
-          Version: ${PACKAGE_VERSION}
-          Section: video
-          Priority: optional
-          Architecture: ${TARGET_ARCH}
-          Installed-Size: ${INSTALLED_SIZE}
-          Maintainer: RK3566 Kodi Builder <builder@example.com>
-          Depends: libc6, libstdc++6, libgcc-s1, libdrm2, libgbm1, libegl1, libgles2, libasound2, libpulse0, libudev1, libdbus-1-3, libcurl4, libssl3, zlib1g, libsqlite3-0, libxml2, libxslt1.1, libpng16-16, libjpeg62-turbo, libfreetype6, libfontconfig1, libfribidi0, libharfbuzz0b, libfmt10, libcrossguid0, libass9, libbluray2, libcdio19, libcec6, libmicrohttpd12, libnfs14, libsmbclient0, libtag1v5, libtinyxml2.6.2v5, libtinyxml2-10, libxkbcommon0, libinput10, libdisplay-info2, libavahi-client3, libavahi-common3, libbluetooth3, libcap2, libdav1d7, libdvdnav4, libdvdread8, libflac12, libgif7, liblzo2-2, libsamplerate0, libshairplay0, libvorbis0a, libvorbisenc2, libogg0, libmariadb3
-          Provides: kodi
-          Conflicts: kodi
-          Replaces: kodi
-          Description: Kodi Omega GBM/GLES for RK3566 with Rockchip MPP/RGA FFmpeg
-           Custom Debian Trixie arm64 Kodi Omega build for Radxa Zero 3W / RK3566.
-           Built with external ffmpeg-rockchip, Rockchip MPP and librga support.
-          EOF
-          
-                    cat > "$PKGROOT/DEBIAN/postinst" <<EOF
-          #!/bin/sh
-          set -e
-          ldconfig || true
-          exit 0
-          EOF
-          
-                    cat > "$PKGROOT/DEBIAN/postrm" <<EOF
-          #!/bin/sh
-          set -e
-          ldconfig || true
-          exit 0
-          EOF
-          
-                    chmod 0755 "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm"
-          
-                    echo "========== Build .deb =========="
-                    mkdir -p /workspace/output
-                    dpkg-deb --build "$PKGROOT" "/workspace/output/${PACKAGE_NAME}_${PACKAGE_VERSION}_${TARGET_ARCH}.deb"
-          
-                    echo "========== Package result =========="
-                    ls -lh /workspace/output/*.deb
-          
-                    echo "========== ccache status after build =========="
-                    ccache --show-stats || true
-          
-                    '
-          
-                - name: Upload Kodi RK3566 Debian package
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: kodi-rk3566-omega-trixie-arm64
-                    path: output/*.deb
-                    if-no-files-found: error
+/usr/local/lib
+/usr/local/lib/aarch64-linux-gnu
+EOF
+
+          echo "========== Create Debian package metadata =========="
+          mkdir -p "$PKGROOT/DEBIAN"
+
+          INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
+
+          cat > "$PKGROOT/DEBIAN/control" <<EOF
+Package: ${PACKAGE_NAME}
+Version: ${PACKAGE_VERSION}
+Section: video
+Priority: optional
+Architecture: ${TARGET_ARCH}
+Installed-Size: ${INSTALLED_SIZE}
+Maintainer: RK3566 Kodi Builder <builder@example.com>
+Depends: libc6, libstdc++6, libgcc-s1, libdrm2, libgbm1, libegl1, libgles2, libasound2, libpulse0, libudev1, libdbus-1-3, libcurl4, libssl3, zlib1g, libsqlite3-0, libxml2, libxslt1.1, libpng16-16, libjpeg62-turbo, libfreetype6, libfontconfig1, libfribidi0, libharfbuzz0b, libfmt10, libcrossguid0, libass9, libbluray2, libcdio19, libcec6, libmicrohttpd12, libnfs14, libsmbclient0, libtag1v5, libtinyxml2.6.2v5, libtinyxml2-10, libxkbcommon0, libinput10, libdisplay-info2, libavahi-client3, libavahi-common3, libbluetooth3, libcap2, libdav1d7, libdvdnav4, libdvdread8, libflac12, libgif7, liblzo2-2, libsamplerate0, libshairplay0, libvorbis0a, libvorbisenc2, libogg0, libmariadb3
+Provides: kodi
+Conflicts: kodi
+Replaces: kodi
+Description: Kodi Omega GBM/GLES for RK3566 with Rockchip MPP/RGA FFmpeg
+ Custom Debian Trixie arm64 Kodi Omega build for Radxa Zero 3W / RK3566.
+ Built with external ffmpeg-rockchip, Rockchip MPP and librga support.
+EOF
+
+          cat > "$PKGROOT/DEBIAN/postinst" <<EOF
+#!/bin/sh
+set -e
+/sbin/ldconfig || ldconfig || true
+exit 0
+EOF
+
+          cat > "$PKGROOT/DEBIAN/postrm" <<EOF
+#!/bin/sh
+set -e
+/sbin/ldconfig || ldconfig || true
+exit 0
+EOF
+
+          chmod 0755 "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm"
+
+          echo "========== Build .deb =========="
+          mkdir -p /workspace/output
+          dpkg-deb --build "$PKGROOT" "/workspace/output/${PACKAGE_NAME}_${PACKAGE_VERSION}_${TARGET_ARCH}.deb"
+
+          echo "========== Package result =========="
+          ls -lh /workspace/output/*.deb
+
+          echo "========== ccache status after build =========="
+          ccache --show-stats || true
+
+          '
+
+      - name: Upload Kodi RK3566 Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodi-rk3566-omega-trixie-arm64
+          path: output/*.deb
+          if-no-files-found: error
