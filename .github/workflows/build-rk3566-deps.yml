@@ -1,0 +1,374 @@
+name: Build RK3566 Dependencies
+
+on:
+  workflow_dispatch:
+
+  push:
+    paths:
+      - ".github/workflows/build-rk3566-deps.yml"
+
+jobs:
+  build-rk3566-deps:
+    name: Build PCRE MPP RGA FFmpeg arm64 deps
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CCACHE_DIR: /workspace/.ccache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-rk3566-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/build-rk3566-deps.yml') }}
+          restore-keys: |
+            ccache-rk3566-deps-${{ runner.os }}-${{ runner.arch }}-
+            ccache-rk3566-deps-
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p .ccache output
+
+      - name: Build dependencies inside Debian Trixie arm64
+        run: |
+          docker run --rm \
+            --platform linux/arm64 \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e DEBIAN_FRONTEND="${DEBIAN_FRONTEND}" \
+            -e CCACHE_DIR="${CCACHE_DIR}" \
+            arm64v8/debian:trixie \
+            bash -euxo pipefail <<'BASH'
+          export PATH="/usr/lib/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          export CCACHE_DIR="/workspace/.ccache"
+          export PKG_CONFIG="/usr/bin/pkg-config"
+          export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
+          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu"
+          export CFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export CXXFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu -L/lib/aarch64-linux-gnu"
+
+          apt-get update
+
+          apt-get install -y --no-install-recommends \
+            libc-bin \
+            build-essential \
+            git \
+            ca-certificates \
+            curl \
+            wget \
+            unzip \
+            zip \
+            xz-utils \
+            zstd \
+            file \
+            patch \
+            pkg-config \
+            ccache \
+            cmake \
+            ninja-build \
+            meson \
+            autoconf \
+            automake \
+            autopoint \
+            libtool \
+            libtool-bin \
+            gettext \
+            gperf \
+            yasm \
+            nasm \
+            python3 \
+            python3-dev \
+            python3-pip \
+            python3-setuptools \
+            python3-wheel \
+            dpkg-dev \
+            fakeroot \
+            debhelper \
+            dh-make \
+            devscripts \
+            equivs \
+            libssl-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            liblzma-dev \
+            liblzo2-dev \
+            libzstd-dev \
+            libxml2-dev \
+            libxslt1-dev \
+            libsqlite3-dev \
+            libmariadb-dev \
+            libmariadb-dev-compat \
+            libcurl4-openssl-dev \
+            libdrm-dev \
+            libdav1d-dev \
+            libx264-dev \
+            libx265-dev \
+            libvpx-dev \
+            libopus-dev \
+            libvorbis-dev \
+            libmp3lame-dev
+
+          mkdir -p /build
+          cd /build
+
+          echo "========== ccache status before deps build =========="
+          ccache --zero-stats || true
+          ccache --show-stats || true
+
+          echo "========== Build and install PCRE 8.45 =========="
+          wget -O pcre-8.45.tar.gz https://downloads.sourceforge.net/project/pcre/pcre/8.45/pcre-8.45.tar.gz
+          tar xf pcre-8.45.tar.gz
+          cd pcre-8.45
+
+          ./configure \
+            --prefix=/usr/local \
+            --enable-shared \
+            --disable-static \
+            --enable-utf \
+            --enable-unicode-properties \
+            --enable-pcre16 \
+            --enable-pcre32
+
+          make -j"$(nproc)"
+          make install
+
+          /sbin/ldconfig || ldconfig || true
+
+          pkg-config --modversion libpcre || pkg-config --modversion pcre
+          ls -l /usr/local/lib/libpcre* || true
+
+          cd /build
+
+          echo "========== Build and install Rockchip MPP =========="
+          git clone --depth=1 https://github.com/rockchip-linux/mpp.git
+          cd mpp
+
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+          cmake --build build -j"$(nproc)"
+          cmake --install build
+
+          /sbin/ldconfig || ldconfig || true
+
+          pkg-config --modversion rockchip_mpp || true
+          pkg-config --libs rockchip_mpp || true
+
+          cd /build
+
+          echo "========== Install Rockchip librga Debian packages from GitHub releases =========="
+          mkdir -p /build/rga-debs
+          cd /build/rga-debs
+
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: github-actions-kodi-rk3566-builder" \
+            "https://api.github.com/repos/tsukumijima/librga-rockchip/releases/latest" \
+            -o /tmp/librga-release.json
+
+          echo "Release assets:"
+          grep -oE "https://[^\" ]+_arm64\.deb" /tmp/librga-release.json | sort -u || true
+
+          DEB_URLS="$(grep -oE "https://[^\" ]+_arm64\.deb" /tmp/librga-release.json | sort -u || true)"
+
+          if [ -z "$DEB_URLS" ]; then
+            echo "ERROR: No *_arm64.deb assets found in latest librga-rockchip release"
+            cat /tmp/librga-release.json
+            exit 1
+          fi
+
+          for url in $DEB_URLS; do
+            file="$(basename "$url")"
+            echo "Downloading $file"
+            wget -O "$file" "$url"
+          done
+
+          ls -lh /build/rga-debs/*.deb
+          apt-get install -y /build/rga-debs/*.deb
+
+          /sbin/ldconfig || ldconfig || true
+
+          echo "========== Ensure librga pkg-config compatibility =========="
+          export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
+
+          if ! pkg-config --exists librga; then
+            echo "Creating librga.pc compatibility file"
+
+            RGA_LIBDIR=""
+            if [ -f /usr/lib/aarch64-linux-gnu/librga.so ]; then
+              RGA_LIBDIR="/usr/lib/aarch64-linux-gnu"
+            elif ls /usr/lib/aarch64-linux-gnu/librga.so.* >/dev/null 2>&1; then
+              RGA_LIBDIR="/usr/lib/aarch64-linux-gnu"
+              ln -sf "$(ls /usr/lib/aarch64-linux-gnu/librga.so.* | head -n1)" /usr/lib/aarch64-linux-gnu/librga.so
+            elif [ -f /lib/aarch64-linux-gnu/librga.so ]; then
+              RGA_LIBDIR="/lib/aarch64-linux-gnu"
+            elif ls /lib/aarch64-linux-gnu/librga.so.* >/dev/null 2>&1; then
+              RGA_LIBDIR="/lib/aarch64-linux-gnu"
+              ln -sf "$(ls /lib/aarch64-linux-gnu/librga.so.* | head -n1)" /lib/aarch64-linux-gnu/librga.so
+            else
+              echo "ERROR: cannot find installed librga.so"
+              find /usr /lib /usr/local -name "librga*" 2>/dev/null | sort || true
+              exit 1
+            fi
+
+            RGA_INCLUDEDIR="/usr/include"
+
+            mkdir -p /usr/local/lib/aarch64-linux-gnu/pkgconfig
+            mkdir -p /usr/local/lib/pkgconfig
+
+            printf '%s\n' \
+              'prefix=/usr' \
+              'exec_prefix=${prefix}' \
+              "libdir=${RGA_LIBDIR}" \
+              "includedir=${RGA_INCLUDEDIR}" \
+              '' \
+              'Name: librga' \
+              'Description: Rockchip RGA userspace library' \
+              'Version: 2.2.0' \
+              'Libs: -L${libdir} -lrga' \
+              'Libs.private: -ldl -lpthread' \
+              'Cflags: -I${includedir} -I${includedir}/rga' \
+              > /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc
+
+            cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/aarch64-linux-gnu/pkgconfig/rga.pc
+            cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/pkgconfig/librga.pc
+            cp -av /usr/local/lib/aarch64-linux-gnu/pkgconfig/librga.pc /usr/local/lib/pkgconfig/rga.pc
+          fi
+
+          pkg-config --exists librga
+          pkg-config --modversion librga
+          pkg-config --cflags --libs librga
+
+          RGA_REAL_LIB="$(ldconfig -p | grep -E "librga\\.so" | awk "{print \$NF}" | head -n1 || true)"
+          if [ -z "$RGA_REAL_LIB" ]; then
+            RGA_REAL_LIB="$(find /usr /usr/local /lib -type f \( -name "librga.so" -o -name "librga.so.*" \) 2>/dev/null | head -n1 || true)"
+          fi
+
+          if [ -z "$RGA_REAL_LIB" ]; then
+            echo "ERROR: cannot locate installed librga.so"
+            exit 1
+          fi
+
+          RGA_REAL_LIB_RESOLVED="$(readlink -f "$RGA_REAL_LIB")"
+
+          file "$RGA_REAL_LIB_RESOLVED"
+          readelf -h "$RGA_REAL_LIB_RESOLVED" | grep -E "Class:|Machine:"
+
+          if ! readelf -h "$RGA_REAL_LIB_RESOLVED" | grep -qi "AArch64"; then
+            echo "ERROR: installed RGA lib target is not AArch64"
+            exit 1
+          fi
+
+          echo "========== Verify RGA compile/link test =========="
+          printf '%s\n' \
+            '#include <stdio.h>' \
+            '#include <rga.h>' \
+            '#include <RgaApi.h>' \
+            '#include <im2d.h>' \
+            'int main(void) {' \
+            '  printf("rga headers/link ok\n");' \
+            '  return 0;' \
+            '}' \
+            > /tmp/test-rga.c
+
+          gcc /tmp/test-rga.c -o /tmp/test-rga $(pkg-config --cflags --libs librga)
+          ldd /tmp/test-rga || true
+          /tmp/test-rga || true
+
+          cd /build
+
+          echo "========== Build and install ffmpeg-rockchip =========="
+          git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git
+          cd ffmpeg-rockchip
+
+          export PKG_CONFIG="/usr/bin/pkg-config"
+          export PKG_CONFIG_PATH="/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig"
+          export LD_LIBRARY_PATH="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu"
+          export CFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export CXXFLAGS="-I/usr/local/include -I/usr/include -I/usr/include/rga"
+          export LDFLAGS="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu -L/lib/aarch64-linux-gnu"
+
+          ./configure \
+            --prefix=/usr/local \
+            --pkg-config=/usr/bin/pkg-config \
+            --extra-cflags="-I/usr/local/include -I/usr/include -I/usr/include/rga" \
+            --extra-ldflags="-L/usr/local/lib/aarch64-linux-gnu -L/usr/local/lib -L/usr/lib/aarch64-linux-gnu -L/lib/aarch64-linux-gnu" \
+            --extra-libs="-lrga -lpthread -lm -ldl" \
+            --enable-gpl \
+            --enable-version3 \
+            --enable-shared \
+            --disable-static \
+            --disable-debug \
+            --enable-libdrm \
+            --enable-rkmpp \
+            --enable-rkrga \
+            --enable-libdav1d \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libvpx \
+            --enable-libopus \
+            --enable-libvorbis \
+            --enable-libmp3lame \
+            --enable-openssl
+
+          make -j"$(nproc)"
+          make install
+
+          /sbin/ldconfig || ldconfig || true
+
+          echo "========== Verify ffmpeg-rockchip =========="
+          ffmpeg -hide_banner -decoders | grep -Ei "rkmpp|h264|hevc" || true
+          ffmpeg -hide_banner -filters | grep -Ei "rga|scale" || true
+          pkg-config --modversion libavcodec
+          pkg-config --libs libavcodec
+
+          echo "========== Create deps rootfs artifact =========="
+          mkdir -p /workspace/output/deps-rootfs/usr/local
+          cp -a /usr/local/. /workspace/output/deps-rootfs/usr/local/
+
+          mkdir -p /workspace/output/deps-rootfs/usr/include
+          cp -a /usr/include/rga /workspace/output/deps-rootfs/usr/include/ 2>/dev/null || true
+
+          mkdir -p /workspace/output/deps-rootfs/usr/local/lib/aarch64-linux-gnu
+
+          if [ -n "${RGA_REAL_LIB_RESOLVED:-}" ] && [ -f "$RGA_REAL_LIB_RESOLVED" ]; then
+            cp -av "$RGA_REAL_LIB_RESOLVED" /workspace/output/deps-rootfs/usr/local/lib/aarch64-linux-gnu/librga.so.2.2.0
+            ln -sf librga.so.2.2.0 /workspace/output/deps-rootfs/usr/local/lib/aarch64-linux-gnu/librga.so.2
+            ln -sf librga.so.2.2.0 /workspace/output/deps-rootfs/usr/local/lib/aarch64-linux-gnu/librga.so
+          fi
+
+          printf '%s\n' \
+            'RK3566 Debian Trixie deps rootfs:' \
+            '- PCRE 8.45' \
+            '- Rockchip MPP' \
+            '- Rockchip librga' \
+            '- ffmpeg-rockchip with RKMPP/RGA' \
+            > /workspace/output/deps-rootfs/usr/local/README-rk3566-deps.txt
+
+          cd /workspace/output
+          tar --zstd -cpf rk3566-trixie-deps-rootfs.tar.zst deps-rootfs
+
+          ls -lh /workspace/output/rk3566-trixie-deps-rootfs.tar.zst
+
+          echo "========== ccache status after deps build =========="
+          ccache --show-stats || true
+          BASH
+
+      - name: Upload RK3566 deps artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rk3566-trixie-deps-rootfs
+          path: output/rk3566-trixie-deps-rootfs.tar.zst
+          retention-days: 14
+          if-no-files-found: error
