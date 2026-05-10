@@ -15,7 +15,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: kodi-rk3566-omega
-      PACKAGE_VERSION: 21.0-rk3566-trixie-14
+      PACKAGE_VERSION: 21.0-rk3566-trixie-15
       TARGET_ARCH: arm64
       MAKEFLAGS: -j2
       CCACHE_DIR: /workspace/.ccache
@@ -130,6 +130,7 @@ jobs:
             libcrossguid-dev \
             libfmt-dev \
             libspdlog-dev \
+            libgtest-dev \
             libfstrcmp-dev \
             libfribidi-dev \
             libgcrypt20-dev \
@@ -551,8 +552,6 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCORE_PLATFORM_NAME=gbm \
             -DAPP_RENDER_SYSTEM=gles \
-            -DENABLE_X11=OFF \
-            -DENABLE_WAYLAND=OFF \
             -DENABLE_INTERNAL_FFMPEG=OFF \
             -DENABLE_INTERNAL_FLATBUFFERS=OFF \
             -DENABLE_INTERNAL_FMT=OFF \
@@ -568,6 +567,8 @@ jobs:
             -DENABLE_PULSEAUDIO=ON \
             -DENABLE_ALSA=ON \
             -DENABLE_INTERNAL_DAV1D=OFF \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_TESTS=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
