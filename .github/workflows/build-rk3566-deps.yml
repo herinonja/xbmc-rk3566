@@ -36,14 +36,14 @@ jobs:
 
       - name: Build dependencies inside Debian Trixie arm64
         run: |
-          docker run --rm \
+          docker run --rm -i \
             --platform linux/arm64 \
             -v "$PWD:/workspace" \
             -w /workspace \
             -e DEBIAN_FRONTEND="${DEBIAN_FRONTEND}" \
             -e CCACHE_DIR="${CCACHE_DIR}" \
             arm64v8/debian:trixie \
-            bash -euxo pipefail <<'BASH'
+            bash -euxo pipefail -s <<'BASH'
           export PATH="/usr/lib/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
           export CCACHE_DIR="/workspace/.ccache"
           export PKG_CONFIG="/usr/bin/pkg-config"
@@ -364,6 +364,11 @@ jobs:
           echo "========== ccache status after deps build =========="
           ccache --show-stats || true
           BASH
+
+      - name: Verify deps artifact exists
+        run: |
+          ls -lah output
+          test -f output/rk3566-trixie-deps-rootfs.tar.zst
 
       - name: Upload RK3566 deps artifact
         uses: actions/upload-artifact@v4
