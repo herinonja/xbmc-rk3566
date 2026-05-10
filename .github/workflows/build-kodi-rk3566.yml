@@ -223,3 +223,143 @@ jobs:
 
           echo "========== Extract RK3566 deps rootfs =========="
           ls -lh /workspace/deps-artifact
+          tar --zstd -xpf /workspace/deps-artifact/rk3566-trixie-deps-rootfs.tar.zst -C /tmp
+          cp -a /tmp/deps-rootfs/. /
+
+          /sbin/ldconfig || ldconfig || true
+
+          echo "========== Verify imported ffmpeg-rockchip =========="
+          command -v ffmpeg
+          ffmpeg -hide_banner -decoders | grep -Ei "rkmpp|h264|hevc" || true
+          ffmpeg -hide_banner -filters | grep -Ei "rga|scale" || true
+          pkg-config --modversion libavcodec
+          pkg-config --libs libavcodec
+
+          echo "========== Build Kodi Omega =========="
+          mkdir -p /build
+          cd /build
+
+          git clone --branch Omega --depth=1 https://github.com/xbmc/xbmc.git kodi
+          cd kodi
+
+          mkdir -p build
+          cd build
+
+          cmake .. \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCORE_PLATFORM_NAME=gbm \
+            -DAPP_RENDER_SYSTEM=gles \
+            -DENABLE_INTERNAL_FFMPEG=OFF \
+            -DENABLE_INTERNAL_FLATBUFFERS=OFF \
+            -DENABLE_INTERNAL_FMT=OFF \
+            -DENABLE_INTERNAL_SPDLOG=OFF \
+            -DENABLE_INTERNAL_CROSSGUID=OFF \
+            -DENABLE_INTERNAL_FSTRCMP=OFF \
+            -DENABLE_INTERNAL_RapidJSON=OFF \
+            -DENABLE_AIRTUNES=ON \
+            -DENABLE_AVAHI=ON \
+            -DENABLE_BLUETOOTH=ON \
+            -DENABLE_DBUS=ON \
+            -DENABLE_OPTICAL=ON \
+            -DENABLE_PULSEAUDIO=ON \
+            -DENABLE_ALSA=ON \
+            -DENABLE_INTERNAL_DAV1D=OFF \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_TESTS=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+          ninja -j"$(nproc)"
+
+          echo "========== Install Kodi into package root =========="
+          PKGROOT="/build/pkgroot"
+          rm -rf "$PKGROOT"
+          DESTDIR="$PKGROOT" ninja install
+
+          echo "========== Add custom runtime libraries to package =========="
+          mkdir -p "$PKGROOT/usr/local/lib"
+          mkdir -p "$PKGROOT/usr/local/lib/aarch64-linux-gnu"
+          mkdir -p "$PKGROOT/etc/ld.so.conf.d"
+
+          cp -av /usr/local/lib/libpcre.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcre16.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcre32.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcreposix.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libpcrecpp.so* "$PKGROOT/usr/local/lib/" || true
+
+          cp -av /usr/local/lib/libmpp* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/librockchip_mpp* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/aarch64-linux-gnu/libav*.so* "$PKGROOT/usr/local/lib/aarch64-linux-gnu/" || true
+          cp -av /usr/local/lib/aarch64-linux-gnu/libsw*.so* "$PKGROOT/usr/local/lib/aarch64-linux-gnu/" || true
+          cp -av /usr/local/lib/libav*.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/libsw*.so* "$PKGROOT/usr/local/lib/" || true
+          cp -av /usr/local/lib/aarch64-linux-gnu/librga.so* "$PKGROOT/usr/local/lib/aarch64-linux-gnu/" || true
+
+          printf '%s\n' \
+            '/usr/local/lib/aarch64-linux-gnu' \
+            '/usr/local/lib' \
+            > "$PKGROOT/etc/ld.so.conf.d/kodi-rk3566.conf"
+
+          echo "========== Create Debian package metadata =========="
+          mkdir -p "$PKGROOT/DEBIAN"
+
+          INSTALLED_SIZE="$(du -ks "$PKGROOT" | awk "{print \$1}")"
+
+          printf '%s\n' \
+            "Package: ${PACKAGE_NAME}" \
+            "Version: ${PACKAGE_VERSION}" \
+            "Section: video" \
+            "Priority: optional" \
+            "Architecture: ${TARGET_ARCH}" \
+            "Installed-Size: ${INSTALLED_SIZE}" \
+            "Maintainer: RK3566 Kodi Builder <builder@example.com>" \
+            "Depends: libc6, libstdc++6, libgcc-s1, libdrm2, libgbm1, libegl1, libgles2, libasound2, libpulse0, libudev1, libdbus-1-3, libcurl4, libssl3, zlib1g, libsqlite3-0, libxml2, libxslt1.1, libpng16-16, libjpeg62-turbo, libfreetype6, libfontconfig1, libfribidi0, libharfbuzz0b, libfmt10, libspdlog1.15 | libspdlog1.12 | libspdlog1.10, libcrossguid0, libass9, libbluray2, libcdio19, libcec6, libmicrohttpd12, libnfs14, libsmbclient0, libtag1v5, libtinyxml2.6.2v5, libtinyxml2-10, libxkbcommon0, libinput10, libdisplay-info2, libavahi-client3, libavahi-common3, libbluetooth3, libcap2, libdav1d7, libdvdnav4, libdvdread8, libflac12, libgif7, liblzo2-2, libsamplerate0, libshairplay0, libvorbis0a, libvorbisenc2, libogg0, libmariadb3" \
+            "Provides: kodi" \
+            "Conflicts: kodi" \
+            "Replaces: kodi" \
+            "Description: Kodi Omega GBM/GLES for RK3566 with Rockchip MPP/RGA FFmpeg" \
+            " Custom Debian Trixie arm64 Kodi Omega build for Radxa Zero 3W / RK3566." \
+            " Built with external ffmpeg-rockchip, Rockchip MPP and librga support." \
+            > "$PKGROOT/DEBIAN/control"
+
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'set -e' \
+            '/sbin/ldconfig || ldconfig || true' \
+            'exit 0' \
+            > "$PKGROOT/DEBIAN/postinst"
+
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'set -e' \
+            '/sbin/ldconfig || ldconfig || true' \
+            'exit 0' \
+            > "$PKGROOT/DEBIAN/postrm"
+
+          chmod 0755 "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm"
+
+          echo "========== Build .deb =========="
+          mkdir -p /workspace/output
+          dpkg-deb --build "$PKGROOT" "/workspace/output/${PACKAGE_NAME}_${PACKAGE_VERSION}_${TARGET_ARCH}.deb"
+
+          echo "========== Package result =========="
+          ls -lh /workspace/output/*.deb
+
+          echo "========== ccache status after Kodi build =========="
+          ccache --show-stats || true
+          BASH
+
+      - name: Verify Kodi package exists
+        run: |
+          ls -lah output
+          test -n "$(find output -maxdepth 1 -name '*.deb' -print -quit)"
+
+      - name: Upload Kodi RK3566 Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodi-rk3566-omega-trixie-arm64
+          path: output/*.deb
+          retention-days: 14
+          if-no-files-found: error
